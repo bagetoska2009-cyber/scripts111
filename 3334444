@@ -1,0 +1,2489 @@
+-- BAGGET SCRIPTS v18.0 [FIXED & VERIFIED STUDIO ADMIN SUITE]
+-- Fixed: AirWalk Height, SpiderClimb Direction, BlackHole Restore, Fly Physics, AimPart Toggles & Memory Cleanup
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local Camera = workspace.CurrentCamera
+
+local LP = Players.LocalPlayer
+local PG = LP:WaitForChild("PlayerGui")
+local Mouse = LP:GetMouse()
+
+-- Безопасная очистка предыдущей сессии при перезапуске
+if _G.BaggetCleanup then
+	pcall(_G.BaggetCleanup)
+end
+
+local Connections = {}
+local SpawnedParts = {}
+
+local function bindConnection(signal, callback)
+	local conn = signal:Connect(callback)
+	table.insert(Connections, conn)
+	return conn
+end
+
+local function trackPart(p)
+	table.insert(SpawnedParts, p)
+	return p
+end
+
+-- Сохранение стандартных настроек мира
+local OrigWorld = {
+	Brightness = Lighting.Brightness,
+	ClockTime = Lighting.ClockTime,
+	FogEnd = Lighting.FogEnd,
+	GlobalShadows = Lighting.GlobalShadows,
+	Ambient = Lighting.Ambient,
+	Gravity = workspace.Gravity,
+	FOV = Camera.FieldOfView
+}
+
+-- Палитра Кибер-Стиля
+local GREEN = Color3.fromRGB(0, 255, 115)
+local DARK_GREEN = Color3.fromRGB(0, 105, 48)
+local BLACK = Color3.fromRGB(6, 6, 9)
+local PANEL_BG = Color3.fromRGB(10, 12, 16)
+local CAT_BG = Color3.fromRGB(14, 24, 19)
+local ELEM_BG = Color3.fromRGB(18, 20, 27)
+local TXT = Color3.fromRGB(220, 235, 225)
+local RED = Color3.fromRGB(235, 55, 55)
+
+-- Конфигурация параметров
+local CFG = {
+	Speed = 16,
+	Jump = 50,
+	FlySpeed = 65,
+	FreecamSpeed = 50,
+	SpinSpeed = 25,
+	DashPower = 95,
+	SpiderSpeed = 35,
+	Gravity = math.floor(workspace.Gravity),
+	HitboxSize = 6,
+	HeadScale = 4,
+	CameraFOV = 70,
+	WorldTime = 14,
+	XRayAlpha = 0.5,
+	
+	OrbitRadius = 8,
+	OrbitSpeed = 4,
+	BlackHoleRadius = 80,
+	BlackHoleDist = 15,
+	
+	TargetPlayers = true,
+	TargetBots = true,
+	
+	ESP_MaxDist = 1500,
+	Tracer_MaxDist = 1500,
+	Aim_MaxDist = 1500,
+	Skeleton_MaxDist = 1500,
+	RadarRange = 250,
+	
+	ESP_WallCheck = false,
+	Tracer_WallCheck = false,
+	Aim_WallCheck = false,
+	Skeleton_WallCheck = false,
+	
+	ESP_TeamCheck = false,
+	TracerTeamCheck = false,
+	AimTeamCheck = false,
+	SkeletonTeamCheck = false,
+	
+	AimPart = "Head",
+	AimSmoothness = 4,
+	AimFOV = 150,
+	ShowFOV = false,
+	AimPrediction = true,
+	PredictionFactor = 0.12,
+	
+	AuraRate = 30,
+	TrailLength = 0.6,
+	
+	Color_PlayerVisible = Color3.fromRGB(0, 255, 115),
+	Color_PlayerHidden = Color3.fromRGB(0, 90, 35),
+	Color_BotVisible = Color3.fromRGB(255, 165, 0),
+	Color_BotHidden = Color3.fromRGB(120, 60, 0),
+}
+
+-- Состояния модулей
+local S = {
+	TelemetryHUD = true,
+	RadarHUD = false,
+	PartInspector = false,
+	
+	SpeedLock = false,
+	AutoBhop = false,
+	InfiniteJump = false,
+	SpiderClimb = false,
+	FreezeChar = false,
+	Noclip = false,
+	AntiFling = false,
+	AntiVoid = true,
+	Fly = false,
+	Freecam = false,
+	AirWalk = false,
+	Spinbot = false,
+	CtrlClickTP = false,
+	AltClickImpulse = false,
+	BToolsHotkeys = false,
+	BlackHole = false,
+	OrbitTarget = false,
+	
+	ESP = false,
+	BoxESP = false,
+	HealthESP = false,
+	NameESP = false,
+	LookLaserESP = false,
+	Tracers = false,
+	Skeleton = false,
+	
+	Aimbot = false,
+	TriggerIndicator = false,
+	TargetHUD = true,
+	HitboxExpander = false,
+	BigHeads = false,
+	
+	Pulse = false,
+	Aura = false,
+	Halo = false,
+	ChinaHat = false,
+	OrbitOrbs = false,
+	CyberShield = false,
+	StepWaves = false,
+	Trail = false,
+	
+	Crosshair = false,
+	InfiniteZoom = false,
+	CustomFOV = false,
+	Fullbright = false,
+	XRay = false,
+	TimeChanger = false,
+	RainbowMode = false
+}
+
+local Keybinds = {}
+local bindingFeatureName = nil
+local currentThemeColor = GREEN
+_G.BaggetBinds = {}
+
+-- Вспомогательные функции персонажа
+local function getChar() return LP.Character end
+local function getHum() local c = getChar() return c and c:FindFirstChildOfClass("Humanoid") end
+local function getRoot()
+	local c = getChar()
+	return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c:FindFirstChild("UpperTorso") or c.PrimaryPart)
+end
+
+local function isTeammate(p)
+	if not p or not p:IsA("Player") then return false end
+	if p == LP then return true end
+	if LP.Team and p.Team and LP.Team == p.Team then return true end
+	return false
+end
+
+local function checkDistance(targetRoot, maxDist)
+	local root = getRoot()
+	if not root or not targetRoot then return false end
+	return (root.Position - targetRoot.Position).Magnitude <= maxDist
+end
+
+-- Определение точной высоты стоп для R6 и R15
+local function getGroundOffset()
+	local h = getHum()
+	local r = getRoot()
+	if not h or not r then return 3.2 end
+	if h.RigType == Enum.HumanoidRigType.R6 then
+		return 3.05
+	else
+		return (h.HipHeight > 0 and h.HipHeight or 2) + (r.Size.Y * 0.5) + 0.15
+	end
+end
+
+-- ==========================================
+-- КЭШ ТЕХНОЛОГИЯ NPC И ЦЕЛЕЙ
+-- ==========================================
+local trackedBots = {}
+local cachedTargetsList = {}
+local lastTargetUpdate = 0
+
+local function registerBotModel(model)
+	if model and model:IsA("Model") and model ~= getChar() and not Players:GetPlayerFromCharacter(model) then
+		local hum = model:FindFirstChildOfClass("Humanoid")
+		local root = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso") or model.PrimaryPart
+		if hum and root then
+			trackedBots[model] = {Model = model, Humanoid = hum, RootPart = root}
+		end
+	end
+end
+
+task.spawn(function()
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("Humanoid") and obj.Parent then
+			registerBotModel(obj.Parent)
+		end
+	end
+end)
+
+bindConnection(workspace.DescendantAdded, function(obj)
+	if obj:IsA("Humanoid") then
+		task.wait(0.1)
+		if obj.Parent then registerBotModel(obj.Parent) end
+	end
+end)
+
+bindConnection(workspace.DescendantRemoving, function(obj)
+	if obj:IsA("Model") and trackedBots[obj] then
+		trackedBots[obj] = nil
+	end
+end)
+
+local function getValidTargets(checkTeamForMode)
+	local now = tick()
+	if now - lastTargetUpdate > 0.1 then
+		lastTargetUpdate = now
+		table.clear(cachedTargetsList)
+		if CFG.TargetPlayers then
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= LP then
+					local c = p.Character
+					if c then
+						local hum = c:FindFirstChildOfClass("Humanoid")
+						local root = c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c:FindFirstChild("UpperTorso") or c.PrimaryPart
+						if hum and root and hum.Health > 0 then
+							table.insert(cachedTargetsList, {Model = c, Player = p, IsPlayer = true, Humanoid = hum, RootPart = root, Name = p.DisplayName or p.Name})
+						end
+					end
+				end
+			end
+		end
+		if CFG.TargetBots then
+			for model, data in pairs(trackedBots) do
+				if model and model.Parent and data.Humanoid and data.Humanoid.Health > 0 and data.RootPart then
+					if model ~= getChar() then
+						table.insert(cachedTargetsList, {Model = model, Player = nil, IsPlayer = false, Humanoid = data.Humanoid, RootPart = data.RootPart, Name = model.Name})
+					end
+				else
+					trackedBots[model] = nil
+				end
+			end
+		end
+	end
+
+	if not checkTeamForMode then
+		return cachedTargetsList
+	end
+
+	local filtered = {}
+	for _, t in ipairs(cachedTargetsList) do
+		if not (t.IsPlayer and isTeammate(t.Player)) then
+			table.insert(filtered, t)
+		end
+	end
+	return filtered
+end
+
+-- Оптимизированный Raycast Cache
+local visibilityCache = {}
+local lastCachePurge = tick()
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+raycastParams.IgnoreWater = true
+
+local function isVisible(targetPart)
+	if not targetPart or not targetPart.Parent then return false end
+	local now = tick()
+	if now - lastCachePurge > 15 then
+		table.clear(visibilityCache)
+		lastCachePurge = now
+	end
+	
+	local cached = visibilityCache[targetPart]
+	if cached and (now - cached.time < 0.15) then return cached.status end
+
+	local char = getChar()
+	if not char then return false end
+	
+	raycastParams.FilterDescendantsInstances = {char, Camera}
+	local origin = Camera.CFrame.Position
+	local direction = (targetPart.Position - origin)
+	
+	local result = workspace:Raycast(origin, direction, raycastParams)
+	local visible = true
+	if result and not result.Instance:IsDescendantOf(targetPart.Parent) then
+		visible = false
+	end
+	
+	visibilityCache[targetPart] = {status = visible, time = now}
+	return visible
+end
+
+-- ==========================================
+-- ИНТЕРФЕЙС И UI СЛОИ
+-- ==========================================
+local old = PG:FindFirstChild("BaggetUI")
+if old then old:Destroy() end
+
+local SG = Instance.new("ScreenGui")
+SG.Name = "BaggetUI"
+SG.ResetOnSpawn = false
+SG.IgnoreGuiInset = true
+SG.DisplayOrder = 99999
+SG.Parent = PG
+
+local DrawLayer = Instance.new("Frame")
+DrawLayer.Name = "DrawLayer"
+DrawLayer.Size = UDim2.new(1, 0, 1, 0)
+DrawLayer.BackgroundTransparency = 1
+DrawLayer.Active = false
+DrawLayer.Parent = SG
+
+-- Live Telemetry HUD
+local TelemetryBar = Instance.new("Frame")
+TelemetryBar.Size = UDim2.new(0, 540, 0, 26)
+TelemetryBar.AnchorPoint = Vector2.new(0.5, 0)
+TelemetryBar.Position = UDim2.new(0.5, 0, 0, 8)
+TelemetryBar.BackgroundColor3 = PANEL_BG
+TelemetryBar.BackgroundTransparency = 0.15
+TelemetryBar.BorderSizePixel = 1
+TelemetryBar.BorderColor3 = GREEN
+TelemetryBar.Parent = DrawLayer
+Instance.new("UICorner", TelemetryBar).CornerRadius = UDim.new(0, 5)
+
+local TelemetryText = Instance.new("TextLabel", TelemetryBar)
+TelemetryText.Size = UDim2.new(1, -12, 1, 0)
+TelemetryText.Position = UDim2.new(0, 6, 0, 0)
+TelemetryText.BackgroundTransparency = 1
+TelemetryText.Text = "FPS: 60 | SPD: 0 | POS: (0, 0, 0) | ENTITIES: 0"
+TelemetryText.TextColor3 = GREEN
+TelemetryText.Font = Enum.Font.Code
+TelemetryText.TextSize = 11
+
+-- Инспектор деталей (Part Inspector HUD)
+local InspectorFrame = Instance.new("Frame")
+InspectorFrame.Size = UDim2.new(0, 260, 0, 62)
+InspectorFrame.Position = UDim2.new(1, -275, 0, 45)
+InspectorFrame.BackgroundColor3 = PANEL_BG
+InspectorFrame.BackgroundTransparency = 0.15
+InspectorFrame.BorderSizePixel = 1
+InspectorFrame.BorderColor3 = GREEN
+InspectorFrame.Visible = false
+InspectorFrame.Parent = DrawLayer
+Instance.new("UICorner", InspectorFrame).CornerRadius = UDim.new(0, 5)
+
+local InspectorText = Instance.new("TextLabel", InspectorFrame)
+InspectorText.Size = UDim2.new(1, -12, 1, -8)
+InspectorText.Position = UDim2.new(0, 6, 0, 4)
+InspectorText.BackgroundTransparency = 1
+InspectorText.TextColor3 = TXT
+InspectorText.Font = Enum.Font.Code
+InspectorText.TextSize = 10
+InspectorText.TextXAlignment = Enum.TextXAlignment.Left
+InspectorText.TextYAlignment = Enum.TextYAlignment.Top
+InspectorText.Text = "PART INSPECTOR:\nHover over any object..."
+
+-- 360 Radar HUD
+local RadarFrame = Instance.new("Frame")
+RadarFrame.Size = UDim2.new(0, 150, 0, 150)
+RadarFrame.Position = UDim2.new(0, 18, 0, 45)
+RadarFrame.BackgroundColor3 = PANEL_BG
+RadarFrame.BackgroundTransparency = 0.2
+RadarFrame.BorderSizePixel = 1
+RadarFrame.BorderColor3 = GREEN
+RadarFrame.Visible = false
+RadarFrame.ClipsDescendants = true
+RadarFrame.Parent = DrawLayer
+Instance.new("UICorner", RadarFrame).CornerRadius = UDim.new(1, 0)
+local radarStroke = Instance.new("UIStroke", RadarFrame)
+radarStroke.Color = GREEN
+radarStroke.Thickness = 1.5
+
+local radarCrossX = Instance.new("Frame", RadarFrame)
+radarCrossX.Size = UDim2.new(1, 0, 0, 1)
+radarCrossX.Position = UDim2.new(0, 0, 0.5, 0)
+radarCrossX.BackgroundColor3 = DARK_GREEN
+radarCrossX.BorderSizePixel = 0
+
+local radarCrossY = Instance.new("Frame", RadarFrame)
+radarCrossY.Size = UDim2.new(0, 1, 1, 0)
+radarCrossY.Position = UDim2.new(0.5, 0, 0, 0)
+radarCrossY.BackgroundColor3 = DARK_GREEN
+radarCrossY.BorderSizePixel = 0
+
+local radarCenter = Instance.new("Frame", RadarFrame)
+radarCenter.Size = UDim2.new(0, 5, 0, 5)
+radarCenter.AnchorPoint = Vector2.new(0.5, 0.5)
+radarCenter.Position = UDim2.new(0.5, 0, 0.5, 0)
+radarCenter.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Instance.new("UICorner", radarCenter).CornerRadius = UDim.new(1, 0)
+
+local radarDotsPool = {}
+
+-- FOV Круг
+local FOVFrame = Instance.new("Frame")
+FOVFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+FOVFrame.BackgroundTransparency = 1
+FOVFrame.Visible = false
+FOVFrame.Parent = DrawLayer
+Instance.new("UICorner", FOVFrame).CornerRadius = UDim.new(1, 0)
+local fovStroke = Instance.new("UIStroke", FOVFrame)
+fovStroke.Color = GREEN
+fovStroke.Thickness = 1.3
+fovStroke.Transparency = 0.25
+
+-- Кастомный вращающийся кибер-прицел
+local CustomCrosshair = Instance.new("Frame")
+CustomCrosshair.Name = "CustomCrosshair"
+CustomCrosshair.Size = UDim2.new(0, 24, 0, 24)
+CustomCrosshair.AnchorPoint = Vector2.new(0.5, 0.5)
+CustomCrosshair.Position = UDim2.new(0.5, 0, 0.5, 0)
+CustomCrosshair.BackgroundTransparency = 1
+CustomCrosshair.Visible = false
+CustomCrosshair.Parent = DrawLayer
+
+local chDot = Instance.new("Frame", CustomCrosshair)
+chDot.Size = UDim2.new(0, 4, 0, 4)
+chDot.AnchorPoint = Vector2.new(0.5, 0.5)
+chDot.Position = UDim2.new(0.5, 0, 0.5, 0)
+chDot.BackgroundColor3 = GREEN
+chDot.BorderSizePixel = 0
+Instance.new("UICorner", chDot).CornerRadius = UDim.new(1, 0)
+
+local chLines = {}
+local lineOffsets = {
+	{UDim2.new(0, 2, 0, 7), UDim2.new(0.5, 0, 0, 2)},
+	{UDim2.new(0, 2, 0, 7), UDim2.new(0.5, 0, 1, -2)},
+	{UDim2.new(0, 7, 0, 2), UDim2.new(0, 2, 0.5, 0)},
+	{UDim2.new(0, 7, 0, 2), UDim2.new(1, -2, 0.5, 0)},
+}
+for _, data in ipairs(lineOffsets) do
+	local l = Instance.new("Frame", CustomCrosshair)
+	l.Size = data[1]
+	l.Position = data[2]
+	l.AnchorPoint = Vector2.new(0.5, 0.5)
+	l.BackgroundColor3 = GREEN
+	l.BorderSizePixel = 0
+	table.insert(chLines, l)
+end
+
+-- Target HUD
+local TargetHUDFrame = Instance.new("Frame")
+TargetHUDFrame.Size = UDim2.new(0, 220, 0, 56)
+TargetHUDFrame.AnchorPoint = Vector2.new(0.5, 0)
+TargetHUDFrame.Position = UDim2.new(0.5, 0, 0.5, 45)
+TargetHUDFrame.BackgroundColor3 = PANEL_BG
+TargetHUDFrame.BackgroundTransparency = 0.15
+TargetHUDFrame.BorderSizePixel = 1
+TargetHUDFrame.BorderColor3 = GREEN
+TargetHUDFrame.Visible = false
+TargetHUDFrame.Parent = DrawLayer
+Instance.new("UICorner", TargetHUDFrame).CornerRadius = UDim.new(0, 6)
+
+local thudTitle = Instance.new("TextLabel", TargetHUDFrame)
+thudTitle.Size = UDim2.new(1, -16, 0, 18)
+thudTitle.Position = UDim2.new(0, 8, 0, 4)
+thudTitle.BackgroundTransparency = 1
+thudTitle.Text = "TARGET: NONE"
+thudTitle.TextColor3 = GREEN
+thudTitle.Font = Enum.Font.Code
+thudTitle.TextSize = 12
+thudTitle.TextXAlignment = Enum.TextXAlignment.Left
+thudTitle.TextTruncate = Enum.TextTruncate.AtEnd
+
+local thudSub = Instance.new("TextLabel", TargetHUDFrame)
+thudSub.Size = UDim2.new(1, -16, 0, 14)
+thudSub.Position = UDim2.new(0, 8, 0, 21)
+thudSub.BackgroundTransparency = 1
+thudSub.Text = "HP: 100/100 | DIST: 0m"
+thudSub.TextColor3 = TXT
+thudSub.Font = Enum.Font.Code
+thudSub.TextSize = 10
+thudSub.TextXAlignment = Enum.TextXAlignment.Left
+
+local thudBarBG = Instance.new("Frame", TargetHUDFrame)
+thudBarBG.Size = UDim2.new(1, -16, 0, 8)
+thudBarBG.Position = UDim2.new(0, 8, 0, 40)
+thudBarBG.BackgroundColor3 = BLACK
+thudBarBG.BorderSizePixel = 0
+Instance.new("UICorner", thudBarBG).CornerRadius = UDim.new(0, 3)
+
+local thudBarFill = Instance.new("Frame", thudBarBG)
+thudBarFill.Size = UDim2.new(1, 0, 1, 0)
+thudBarFill.BackgroundColor3 = GREEN
+thudBarFill.BorderSizePixel = 0
+Instance.new("UICorner", thudBarFill).CornerRadius = UDim.new(0, 3)
+
+-- Главное окно меню
+local P = Instance.new("Frame")
+P.Size = UDim2.new(0, 340, 0, 560)
+P.Position = UDim2.new(0.5, -170, 0.5, -280)
+P.BackgroundColor3 = PANEL_BG
+P.BackgroundTransparency = 0.08
+P.BorderSizePixel = 2
+P.BorderColor3 = GREEN
+P.Active = true
+P.ClipsDescendants = true
+P.Parent = SG
+Instance.new("UICorner", P).CornerRadius = UDim.new(0, 6)
+
+-- Фоновая матрица символов
+local EmojiBG = Instance.new("Folder", P)
+EmojiBG.Name = "EmojiBackground"
+local smiles = {"(^_^)", "[^v^]", ">_<", "0x18", "(•_•)", "[~_~]", "1010", "SYS"}
+task.spawn(function()
+	while SG and SG.Parent do
+		if P.Visible and EmojiBG.Parent then
+			local em = Instance.new("TextLabel")
+			em.Size = UDim2.new(0, 60, 0, 20)
+			local startX = math.random(10, 260)
+			em.Position = UDim2.new(0, startX, 0, 35)
+			em.BackgroundTransparency = 1
+			em.Text = smiles[math.random(1, #smiles)]
+			em.TextColor3 = currentThemeColor
+			em.TextTransparency = 0.72
+			em.TextSize = 11
+			em.Font = Enum.Font.Code
+			em.Parent = EmojiBG
+			
+			task.spawn(function()
+				local posY = 35
+				while em and em.Parent and posY < 530 do
+					posY = posY + 4
+					em.Position = UDim2.new(0, startX, 0, posY)
+					task.wait(0.06)
+				end
+				if em then em:Destroy() end
+			end)
+		end
+		task.wait(1.8)
+	end
+end)
+
+-- Верхняя панель (TopBar)
+local TB = Instance.new("Frame")
+TB.Size = UDim2.new(1, 0, 0, 32)
+TB.BackgroundColor3 = BLACK
+TB.BackgroundTransparency = 0.1
+TB.BorderSizePixel = 1
+TB.BorderColor3 = GREEN
+TB.Active = true
+TB.Parent = P
+
+local TL = Instance.new("TextLabel")
+TL.Size = UDim2.new(1, -65, 1, 0)
+TL.Position = UDim2.new(0, 10, 0, 0)
+TL.BackgroundTransparency = 1
+TL.Text = "BAGGET SCRIPTS [v18.0 STABLE]"
+TL.TextColor3 = GREEN
+TL.TextSize = 12
+TL.Font = Enum.Font.Code
+TL.TextXAlignment = Enum.TextXAlignment.Left
+TL.Parent = TB
+
+local CB = Instance.new("TextButton")
+CB.Size = UDim2.new(0, 22, 0, 22)
+CB.Position = UDim2.new(1, -26, 0, 5)
+CB.BackgroundColor3 = RED
+CB.Text = "X"
+CB.TextColor3 = Color3.fromRGB(255, 255, 255)
+CB.TextSize = 11
+CB.Font = Enum.Font.SourceSansBold
+CB.Parent = TB
+Instance.new("UICorner", CB).CornerRadius = UDim.new(0, 3)
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 22, 0, 22)
+MinBtn.Position = UDim2.new(1, -52, 0, 5)
+MinBtn.BackgroundColor3 = DARK_GREEN
+MinBtn.Text = "-"
+MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinBtn.TextSize = 11
+MinBtn.Font = Enum.Font.SourceSansBold
+MinBtn.Parent = TB
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 3)
+
+local SF = Instance.new("ScrollingFrame")
+SF.Size = UDim2.new(1, -12, 1, -40)
+SF.Position = UDim2.new(0, 6, 0, 36)
+SF.BackgroundTransparency = 1
+SF.BorderSizePixel = 0
+SF.ScrollBarThickness = 3
+SF.ScrollBarImageColor3 = GREEN
+SF.CanvasSize = UDim2.new(0, 0, 0, 0)
+SF.AutomaticCanvasSize = Enum.AutomaticSize.Y
+SF.Parent = P
+
+local LL = Instance.new("UIListLayout")
+LL.Padding = UDim.new(0, 6)
+LL.SortOrder = Enum.SortOrder.LayoutOrder
+LL.Parent = SF
+
+local orderCount = 0
+local function nextOrder() orderCount = orderCount + 1 return orderCount end
+local activeSliderUpdate = nil
+
+local function makeCategory(title, defaultOpen)
+	local catWrapper = Instance.new("Frame")
+	catWrapper.Size = UDim2.new(1, 0, 0, 0)
+	catWrapper.AutomaticSize = Enum.AutomaticSize.Y
+	catWrapper.BackgroundTransparency = 1
+	catWrapper.LayoutOrder = nextOrder()
+	catWrapper.Parent = SF
+
+	local catLayout = Instance.new("UIListLayout")
+	catLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	catLayout.Padding = UDim.new(0, 4)
+	catLayout.Parent = catWrapper
+
+	local headerBtn = Instance.new("TextButton")
+	headerBtn.Size = UDim2.new(1, 0, 0, 28)
+	headerBtn.BackgroundColor3 = CAT_BG
+	headerBtn.BorderSizePixel = 1
+	headerBtn.BorderColor3 = GREEN
+	headerBtn.Text = (defaultOpen and "  [▼] " or "  [►] ") .. title
+	headerBtn.TextColor3 = GREEN
+	headerBtn.Font = Enum.Font.Code
+	headerBtn.TextSize = 11
+	headerBtn.TextXAlignment = Enum.TextXAlignment.Left
+	headerBtn.LayoutOrder = 1
+	headerBtn.Parent = catWrapper
+	Instance.new("UICorner", headerBtn).CornerRadius = UDim.new(0, 4)
+
+	local content = Instance.new("Frame")
+	content.Size = UDim2.new(1, 0, 0, 0)
+	content.AutomaticSize = Enum.AutomaticSize.Y
+	content.BackgroundTransparency = 1
+	content.Visible = defaultOpen or false
+	content.LayoutOrder = 2
+	content.Parent = catWrapper
+
+	local contentPad = Instance.new("UIPadding")
+	contentPad.PaddingLeft = UDim.new(0, 6)
+	contentPad.PaddingRight = UDim.new(0, 2)
+	contentPad.Parent = content
+
+	local contentLayout = Instance.new("UIListLayout")
+	contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	contentLayout.Padding = UDim.new(0, 4)
+	contentLayout.Parent = content
+
+	local isOpen = defaultOpen or false
+	headerBtn.MouseButton1Click:Connect(function()
+		isOpen = not isOpen
+		content.Visible = isOpen
+		headerBtn.Text = (isOpen and "  [▼] " or "  [►] ") .. title
+	end)
+
+	return content
+end
+
+local function makeToggle(parent, name, def, cb)
+	local r = Instance.new("Frame")
+	r.Size = UDim2.new(1, 0, 0, 28)
+	r.BackgroundColor3 = ELEM_BG
+	r.BackgroundTransparency = 0.2
+	r.BorderSizePixel = 1
+	r.BorderColor3 = DARK_GREEN
+	r.LayoutOrder = nextOrder()
+	r.Parent = parent
+	Instance.new("UICorner", r).CornerRadius = UDim.new(0, 4)
+	
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.new(1, -96, 1, 0)
+	l.Position = UDim2.new(0, 8, 0, 0)
+	l.BackgroundTransparency = 1
+	l.Text = (def and "[ON] " or "[OFF] ") .. name
+	l.TextColor3 = def and GREEN or TXT
+	l.TextSize = 11
+	l.Font = Enum.Font.Code
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.TextTruncate = Enum.TextTruncate.AtEnd
+	l.Parent = r
+
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -88, 1, 0)
+	b.BackgroundTransparency = 1
+	b.Text = ""
+	b.Parent = r
+	
+	local bindBtn = Instance.new("TextButton")
+	bindBtn.Size = UDim2.new(0, 76, 0, 20)
+	bindBtn.Position = UDim2.new(1, -80, 0, 4)
+	bindBtn.BackgroundColor3 = BLACK
+	bindBtn.BorderSizePixel = 1
+	bindBtn.BorderColor3 = DARK_GREEN
+	bindBtn.Text = Keybinds[name] and ("[" .. Keybinds[name].Name .. "]") or "[NONE]"
+	bindBtn.TextColor3 = TXT
+	bindBtn.TextSize = 10
+	bindBtn.Font = Enum.Font.Code
+	bindBtn.Parent = r
+	Instance.new("UICorner", bindBtn).CornerRadius = UDim.new(0, 3)
+
+	local st = def
+	local function setState(newState)
+		st = newState
+		l.Text = (st and "[ON] " or "[OFF] ") .. name
+		l.TextColor3 = st and currentThemeColor or TXT
+		pcall(cb, st)
+	end
+
+	b.MouseButton1Click:Connect(function() setState(not st) end)
+	bindBtn.MouseButton1Click:Connect(function()
+		bindBtn.Text = "[...]"
+		bindingFeatureName = name
+	end)
+
+	_G.BaggetBinds[name] = {
+		trigger = function() setState(not st) end,
+		setState = setState,
+		updateBtn = function(key)
+			bindBtn.Text = key and ("[" .. key.Name .. "]") or "[NONE]"
+		end
+	}
+	return setState
+end
+
+local function makeButton(parent, text, bgCol, cb)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 0, 26)
+	btn.BackgroundColor3 = bgCol or DARK_GREEN
+	btn.BorderSizePixel = 1
+	btn.BorderColor3 = GREEN
+	btn.Text = text
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.TextSize = 11
+	btn.Font = Enum.Font.Code
+	btn.LayoutOrder = nextOrder()
+	btn.Parent = parent
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+	btn.MouseButton1Click:Connect(function() pcall(cb) end)
+	return btn
+end
+
+local function makeSlider(parent, name, minV, maxV, def, cb)
+	local r = Instance.new("Frame")
+	r.Size = UDim2.new(1, 0, 0, 42)
+	r.BackgroundColor3 = ELEM_BG
+	r.BackgroundTransparency = 0.2
+	r.BorderSizePixel = 1
+	r.BorderColor3 = DARK_GREEN
+	r.LayoutOrder = nextOrder()
+	r.Parent = parent
+	Instance.new("UICorner", r).CornerRadius = UDim.new(0, 4)
+
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.new(1, -55, 0, 16)
+	l.Position = UDim2.new(0, 8, 0, 2)
+	l.BackgroundTransparency = 1
+	l.Text = name
+	l.TextColor3 = TXT
+	l.TextSize = 11
+	l.Font = Enum.Font.Code
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.Parent = r
+
+	local vl = Instance.new("TextLabel")
+	vl.Size = UDim2.new(0, 45, 0, 16)
+	vl.Position = UDim2.new(1, -53, 0, 2)
+	vl.BackgroundTransparency = 1
+	vl.Text = tostring(def)
+	vl.TextColor3 = GREEN
+	vl.TextSize = 11
+	vl.Font = Enum.Font.Code
+	vl.TextXAlignment = Enum.TextXAlignment.Right
+	vl.Parent = r
+	
+	local ha = Instance.new("TextButton")
+	ha.Size = UDim2.new(1, -16, 0, 18)
+	ha.Position = UDim2.new(0, 8, 0, 20)
+	ha.BackgroundTransparency = 1
+	ha.Text = ""
+	ha.Parent = r
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1, 0, 0, 4)
+	bg.Position = UDim2.new(0, 0, 0.5, -2)
+	bg.BackgroundColor3 = BLACK
+	bg.BorderSizePixel = 1
+	bg.BorderColor3 = DARK_GREEN
+	bg.Parent = ha
+	
+	local ia = math.clamp((def - minV) / (maxV - minV), 0, 1)
+	local fl = Instance.new("Frame")
+	fl.Size = UDim2.new(ia, 0, 1, 0)
+	fl.BackgroundColor3 = GREEN
+	fl.BorderSizePixel = 0
+	fl.Parent = bg
+
+	local kn = Instance.new("Frame")
+	kn.Size = UDim2.new(0, 8, 0, 10)
+	kn.Position = UDim2.new(ia, -4, 0.5, -5)
+	kn.BackgroundColor3 = GREEN
+	kn.BorderSizePixel = 1
+	kn.BorderColor3 = BLACK
+	kn.Parent = bg
+	
+	local function update(inputPos)
+		local a = math.clamp((inputPos.X - bg.AbsolutePosition.X) / math.max(1, bg.AbsoluteSize.X), 0, 1)
+		local v = math.floor(minV + a * (maxV - minV) + 0.5)
+		fl.Size = UDim2.new(a, 0, 1, 0)
+		kn.Position = UDim2.new(a, -4, 0.5, -5)
+		vl.Text = tostring(v)
+		pcall(cb, v)
+	end
+
+	ha.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 then
+			activeSliderUpdate = update
+			update(i.Position)
+		end
+	end)
+end
+
+local function makeColorPicker(parent, name, defaultColor, cb)
+	local r = Instance.new("Frame")
+	r.Size = UDim2.new(1, 0, 0, 30)
+	r.BackgroundColor3 = ELEM_BG
+	r.BackgroundTransparency = 0.2
+	r.BorderSizePixel = 1
+	r.BorderColor3 = DARK_GREEN
+	r.LayoutOrder = nextOrder()
+	r.Parent = parent
+	Instance.new("UICorner", r).CornerRadius = UDim.new(0, 4)
+	
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.new(1, -55, 1, 0)
+	l.Position = UDim2.new(0, 8, 0, 0)
+	l.BackgroundTransparency = 1
+	l.Text = name
+	l.TextColor3 = TXT
+	l.TextSize = 11
+	l.Font = Enum.Font.Code
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.Parent = r
+	
+	local colorBtn = Instance.new("TextButton")
+	colorBtn.Size = UDim2.new(0, 36, 0, 20)
+	colorBtn.Position = UDim2.new(1, -42, 0, 5)
+	colorBtn.BackgroundColor3 = defaultColor
+	colorBtn.Text = ""
+	colorBtn.BorderSizePixel = 1
+	colorBtn.BorderColor3 = BLACK
+	colorBtn.Parent = r
+	Instance.new("UICorner", colorBtn).CornerRadius = UDim.new(0, 3)
+	
+	local presets = {
+		Color3.fromRGB(0, 255, 115),
+		Color3.fromRGB(0, 90, 35),
+		Color3.fromRGB(255, 50, 50),
+		Color3.fromRGB(130, 20, 20),
+		Color3.fromRGB(0, 170, 255),
+		Color3.fromRGB(255, 255, 0),
+		Color3.fromRGB(255, 80, 255),
+		Color3.fromRGB(255, 165, 0),
+		Color3.fromRGB(120, 60, 0),
+		Color3.fromRGB(255, 255, 255)
+	}
+	local currentIndex = 1
+	for i, col in ipairs(presets) do
+		if col == defaultColor then currentIndex = i break end
+	end
+	
+	colorBtn.MouseButton1Click:Connect(function()
+		currentIndex = currentIndex + 1
+		if currentIndex > #presets then currentIndex = 1 end
+		local newCol = presets[currentIndex]
+		colorBtn.BackgroundColor3 = newCol
+		pcall(cb, newCol)
+	end)
+end
+
+-- ==========================================
+-- МОДУЛИ ДВИЖЕНИЯ, САНДБОКСА И ФИЗИКИ (ИСПРАВЛЕНО)
+-- ==========================================
+local noclipConn, originalCollide = nil, {}
+
+local function enableNoclip()
+	if noclipConn then noclipConn:Disconnect() end
+	noclipConn = RunService.Stepped:Connect(function()
+		local c = getChar()
+		if c then
+			for _, part in ipairs(c:GetDescendants()) do
+				if part:IsA("BasePart") then
+					if originalCollide[part] == nil then originalCollide[part] = part.CanCollide end
+					part.CanCollide = false
+				end
+			end
+		end
+	end)
+end
+
+local function disableNoclip()
+	if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+	for part, canCol in pairs(originalCollide) do
+		if part and part.Parent then part.CanCollide = canCol end
+	end
+	table.clear(originalCollide)
+end
+
+-- Исправленный Fly Mode (по направлению камеры + без рывков)
+local flyObj, flyAtt = nil, nil
+local function stopFly()
+	if flyObj then flyObj:Destroy() flyObj = nil end
+	if flyAtt then flyAtt:Destroy() flyAtt = nil end
+	local h = getHum()
+	if h then h.PlatformStand = false end
+end
+
+local function startFly()
+	stopFly()
+	local r = getRoot()
+	if not r then return end
+	flyAtt = Instance.new("Attachment", r)
+	flyObj = Instance.new("LinearVelocity", r)
+	flyObj.Attachment0 = flyAtt
+	flyObj.MaxForce = math.huge
+	flyObj.VectorVelocity = Vector3.zero
+	flyObj.RelativeTo = Enum.ActuatorRelativeTo.World
+end
+
+-- Рывок вперед (Dash)
+local function performDash()
+	local r = getRoot()
+	if r then
+		r.AssemblyLinearVelocity = Camera.CFrame.LookVector * CFG.DashPower + Vector3.new(0, 18, 0)
+	end
+end
+
+-- X-Ray стен
+local xrayParts = {}
+local function toggleXRay(on)
+	if on then
+		for _, obj in ipairs(workspace:GetDescendants()) do
+			if obj:IsA("BasePart") and not obj:IsDescendantOf(getChar() or SG) and obj.Transparency < 0.3 then
+				local hum = obj.Parent and obj.Parent:FindFirstChildOfClass("Humanoid")
+				if not hum then
+					xrayParts[obj] = obj.LocalTransparencyModifier
+					obj.LocalTransparencyModifier = CFG.XRayAlpha
+				end
+			end
+		end
+	else
+		for obj, orig in pairs(xrayParts) do
+			if obj and obj.Parent then obj.LocalTransparencyModifier = orig end
+		end
+		table.clear(xrayParts)
+	end
+end
+
+-- Исправленный AirWalk (Точная высота под стопами для R6 и R15)
+local airWalkPart = nil
+local airWalkY = 0
+local function toggleAirWalk(on)
+	if airWalkPart then airWalkPart:Destroy() airWalkPart = nil end
+	if on then
+		local r = getRoot()
+		if not r then return end
+		local offset = getGroundOffset()
+		airWalkY = r.Position.Y - offset - 0.25
+		airWalkPart = Instance.new("Part", workspace)
+		airWalkPart.Name = "BaggetAirWalk"
+		airWalkPart.Size = Vector3.new(14, 0.5, 14)
+		airWalkPart.Anchored = true
+		airWalkPart.CanCollide = true
+		airWalkPart.Color = currentThemeColor
+		airWalkPart.Material = Enum.Material.Neon
+		airWalkPart.Transparency = 0.55
+		airWalkPart.Position = Vector3.new(r.Position.X, airWalkY, r.Position.Z)
+	end
+end
+
+-- Black Hole с возвратом коллизии
+local blackHoleAffected = {}
+local function restoreBlackHoleParts()
+	for part, origCollide in pairs(blackHoleAffected) do
+		if part and part.Parent then
+			part.CanCollide = origCollide
+		end
+	end
+	table.clear(blackHoleAffected)
+end
+
+-- Anti-Fling с возвратом коллизии
+local antiFlingOrig = {}
+local function restoreAntiFling()
+	for part, origCollide in pairs(antiFlingOrig) do
+		if part and part.Parent then
+			part.CanCollide = origCollide
+		end
+	end
+	table.clear(antiFlingOrig)
+end
+
+-- Freecam
+local freecamCF = CFrame.new()
+local freecamAngles = Vector2.zero
+local function toggleFreecam(on)
+	local r = getRoot()
+	if on then
+		freecamCF = Camera.CFrame
+		local rx, ry, _ = freecamCF:ToEulerAnglesYXZ()
+		freecamAngles = Vector2.new(rx, ry)
+		Camera.CameraType = Enum.CameraType.Scriptable
+		if r then r.Anchored = true end
+	else
+		UIS.MouseBehavior = Enum.MouseBehavior.Default
+		Camera.CameraType = Enum.CameraType.Custom
+		local h = getHum()
+		if h then Camera.CameraSubject = h end
+		if r then r.Anchored = S.FreezeChar end
+	end
+end
+
+-- Система наблюдения (Spectate & Orbit Target)
+local selectedTargetIndex = 1
+local currentSelectedTarget = nil
+local targetLabelUI = nil
+
+local function cycleSelectedTarget(step)
+	local list = getValidTargets(false)
+	if #list == 0 then
+		currentSelectedTarget = nil
+		if targetLabelUI then targetLabelUI.Text = "Выбрано: [НЕТ ЦЕЛЕЙ]" end
+		return
+	end
+	selectedTargetIndex = selectedTargetIndex + step
+	if selectedTargetIndex > #list then selectedTargetIndex = 1 end
+	if selectedTargetIndex < 1 then selectedTargetIndex = #list end
+	currentSelectedTarget = list[selectedTargetIndex]
+	if targetLabelUI then
+		targetLabelUI.Text = "Цель: " .. tostring(currentSelectedTarget.Name)
+	end
+end
+
+-- Хитбоксы и Головы
+local origHitboxes = {}
+local origHeads = {}
+
+local function resetHitboxes()
+	for part, data in pairs(origHitboxes) do
+		if part and part.Parent then
+			part.Size = data.Size
+			part.Transparency = data.Transparency
+			part.CanCollide = data.CanCollide
+		end
+	end
+	table.clear(origHitboxes)
+end
+
+local function resetBigHeads()
+	for head, data in pairs(origHeads) do
+		if head and head.Parent then
+			head.Size = data.Size
+			head.CanCollide = data.CanCollide
+		end
+	end
+	table.clear(origHeads)
+end
+
+local orbitAngle = 0
+local lastStepWave = 0
+local lastSafePosition = nil
+
+bindConnection(RunService.Heartbeat, function(dt)
+	local h = getHum()
+	local r = getRoot()
+	local myChar = getChar()
+
+	if h and r then
+		-- Обновление полета (Fly Mode)
+		if S.Fly and flyObj and flyObj.Parent then
+			local moveVec = Vector3.zero
+			if UIS:IsKeyDown(Enum.KeyCode.W) then moveVec = moveVec + Camera.CFrame.LookVector end
+			if UIS:IsKeyDown(Enum.KeyCode.S) then moveVec = moveVec - Camera.CFrame.LookVector end
+			if UIS:IsKeyDown(Enum.KeyCode.D) then moveVec = moveVec + Camera.CFrame.RightVector end
+			if UIS:IsKeyDown(Enum.KeyCode.A) then moveVec = moveVec - Camera.CFrame.RightVector end
+			if UIS:IsKeyDown(Enum.KeyCode.Space) then moveVec = moveVec + Vector3.new(0, 1, 0) end
+			if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then moveVec = moveVec - Vector3.new(0, 1, 0) end
+			
+			if moveVec.Magnitude > 0.01 then
+				flyObj.VectorVelocity = moveVec.Unit * CFG.FlySpeed
+			else
+				flyObj.VectorVelocity = Vector3.zero
+			end
+		end
+
+		-- Anti-Void защита от выпадения за карту
+		if h.FloorMaterial ~= Enum.Material.Air and r.Position.Y > -50 then
+			lastSafePosition = r.CFrame
+		end
+		if S.AntiVoid and r.Position.Y < -120 then
+			if lastSafePosition then
+				r.CFrame = lastSafePosition + Vector3.new(0, 5, 0)
+			else
+				r.CFrame = CFrame.new(0, 50, 0)
+			end
+			r.AssemblyLinearVelocity = Vector3.zero
+		end
+
+		if S.SpeedLock then
+			h.WalkSpeed = CFG.Speed
+			h.UseJumpPower = true
+			h.JumpPower = CFG.Jump
+		end
+		if S.AutoBhop and h.FloorMaterial ~= Enum.Material.Air and h.MoveDirection.Magnitude > 0 then
+			h:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+
+		-- Исправленный Spider Climb (бьет лучом по направлению движения И взгляда)
+		if S.SpiderClimb and h.MoveDirection.Magnitude > 0.05 then
+			raycastParams.FilterDescendantsInstances = {myChar, Camera, airWalkPart}
+			local checkDir = h.MoveDirection.Unit * 2.8
+			local wallHit = workspace:Raycast(r.Position, checkDir, raycastParams) or workspace:Raycast(r.Position - Vector3.new(0, 1.2, 0), checkDir, raycastParams)
+			if wallHit then
+				r.AssemblyLinearVelocity = Vector3.new(r.AssemblyLinearVelocity.X, CFG.SpiderSpeed, r.AssemblyLinearVelocity.Z)
+			end
+		end
+	end
+
+	-- Black Hole (Притяжение незакрепленных объектов)
+	if S.BlackHole and r and myChar then
+		local holeCenter = r.Position + Camera.CFrame.LookVector * CFG.BlackHoleDist
+		local parts = workspace:GetPartBoundsInRadius(r.Position, CFG.BlackHoleRadius)
+		for _, part in ipairs(parts) do
+			if part:IsA("BasePart") and not part.Anchored and part ~= airWalkPart and not part:IsDescendantOf(myChar) then
+				local pHum = part.Parent and part.Parent:FindFirstChildOfClass("Humanoid")
+				if not pHum then
+					if blackHoleAffected[part] == nil then
+						blackHoleAffected[part] = part.CanCollide
+					end
+					part.CanCollide = false
+					local dir = (holeCenter - part.Position)
+					part.AssemblyLinearVelocity = dir * 4.5
+				end
+			end
+		end
+	end
+
+	-- AirWalk обновление (с поддержкой E/Q)
+	if S.AirWalk and airWalkPart and r then
+		if not UIS:GetFocusedTextBox() then
+			if UIS:IsKeyDown(Enum.KeyCode.E) then airWalkY = airWalkY + (22 * dt) end
+			if UIS:IsKeyDown(Enum.KeyCode.Q) then airWalkY = airWalkY - (22 * dt) end
+		end
+		airWalkPart.Position = Vector3.new(r.Position.X, airWalkY, r.Position.Z)
+		if S.RainbowMode then airWalkPart.Color = currentThemeColor end
+	end
+
+	-- Anti-Fling
+	if S.AntiFling then
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LP and p.Character then
+				for _, part in ipairs(p.Character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						if antiFlingOrig[part] == nil then antiFlingOrig[part] = part.CanCollide end
+						part.CanCollide = false
+					end
+				end
+			end
+		end
+	end
+
+	-- Orbit Target
+	if S.OrbitTarget and currentSelectedTarget and currentSelectedTarget.RootPart and currentSelectedTarget.RootPart.Parent and r then
+		orbitAngle = orbitAngle + dt * CFG.OrbitSpeed
+		local tPos = currentSelectedTarget.RootPart.Position
+		local offset = Vector3.new(math.cos(orbitAngle) * CFG.OrbitRadius, 1.5, math.sin(orbitAngle) * CFG.OrbitRadius)
+		r.CFrame = CFrame.new(tPos + offset, tPos)
+		r.AssemblyLinearVelocity = Vector3.zero
+	elseif S.Spinbot and r then
+		r.CFrame = r.CFrame * CFrame.Angles(0, math.rad(CFG.SpinSpeed), 0)
+	end
+
+	-- Footstep Shockwaves
+	if S.StepWaves and h and r and h.MoveDirection.Magnitude > 0.1 and h.FloorMaterial ~= Enum.Material.Air then
+		if tick() - lastStepWave > 0.35 then
+			lastStepWave = tick()
+			local wave = Instance.new("Part", workspace)
+			wave.Name = "BaggetWave"
+			wave.Anchored = true
+			wave.CanCollide = false
+			wave.CastShadow = false
+			wave.Material = Enum.Material.Neon
+			wave.Color = currentThemeColor
+			wave.Size = Vector3.new(1, 0.08, 1)
+			wave.CFrame = CFrame.new(r.Position - Vector3.new(0, getGroundOffset() - 0.1, 0))
+			Instance.new("CylinderMesh", wave)
+			
+			task.spawn(function()
+				for i = 1, 14 do
+					if not wave or not wave.Parent then break end
+					local sz = 1 + (i * 0.65)
+					wave.Size = Vector3.new(sz, 0.08, sz)
+					wave.Transparency = i / 14
+					task.wait(0.025)
+				end
+				if wave then wave:Destroy() end
+			end)
+		end
+	end
+
+	-- Hitbox Expander & Big Heads
+	if S.HitboxExpander or S.BigHeads then
+		local targets = getValidTargets(CFG.AimTeamCheck)
+		local activeParts = {}
+		local activeHeads = {}
+		for _, t in ipairs(targets) do
+			if S.HitboxExpander then
+				local hrp = t.RootPart
+				if hrp and hrp ~= r then
+					activeParts[hrp] = true
+					if not origHitboxes[hrp] then
+						origHitboxes[hrp] = {Size = hrp.Size, Transparency = hrp.Transparency, CanCollide = hrp.CanCollide}
+					end
+					hrp.Size = Vector3.new(CFG.HitboxSize, CFG.HitboxSize, CFG.HitboxSize)
+					hrp.Transparency = 0.65
+					hrp.Color = currentThemeColor
+					hrp.Material = Enum.Material.Neon
+					hrp.CanCollide = false
+				end
+			end
+			if S.BigHeads then
+				local head = t.Model:FindFirstChild("Head")
+				if head and head:IsA("BasePart") then
+					activeHeads[head] = true
+					if not origHeads[head] then
+						origHeads[head] = {Size = head.Size, CanCollide = head.CanCollide}
+					end
+					head.Size = Vector3.new(CFG.HeadScale, CFG.HeadScale, CFG.HeadScale)
+					head.CanCollide = false
+				end
+			end
+		end
+		for part, data in pairs(origHitboxes) do
+			if not activeParts[part] then
+				if part and part.Parent then
+					part.Size = data.Size
+					part.Transparency = data.Transparency
+					part.CanCollide = data.CanCollide
+				end
+				origHitboxes[part] = nil
+			end
+		end
+		for head, data in pairs(origHeads) do
+			if not activeHeads[head] then
+				if head and head.Parent then
+					head.Size = data.Size
+					head.CanCollide = data.CanCollide
+				end
+				origHeads[head] = nil
+			end
+		end
+	end
+end)
+
+-- ==========================================
+-- МОДУЛИ ОТРИСОВКИ ESP И ЛАЗЕРОВ ВЗГЛЯДА
+-- ==========================================
+local function drawLineUI(lineFrame, fromPos, toPos, color, thickness)
+	local diff = toPos - fromPos
+	local dist = diff.Magnitude
+	local center = (fromPos + toPos) / 2
+	local angle = math.deg(math.atan2(diff.Y, diff.X))
+	
+	lineFrame.Position = UDim2.fromOffset(center.X, center.Y)
+	lineFrame.Size = UDim2.fromOffset(dist, thickness or 1.5)
+	lineFrame.Rotation = angle
+	lineFrame.BackgroundColor3 = color
+	lineFrame.Visible = true
+end
+
+local R15Bones = {
+	{"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+	{"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+	{"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+	{"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+	{"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+}
+local R6Bones = {
+	{"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"}, {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
+}
+
+local skeletonPool = {}
+
+local function updateSkeletonForModel(model, color)
+	local bones = model:FindFirstChild("UpperTorso") and R15Bones or (model:FindFirstChild("Torso") and R6Bones)
+	if not bones then return end
+
+	if not skeletonPool[model] then skeletonPool[model] = {} end
+	local modelLines = skeletonPool[model]
+
+	local lineIndex = 1
+	for _, pair in ipairs(bones) do
+		local p1 = model:FindFirstChild(pair[1])
+		local p2 = model:FindFirstChild(pair[2])
+		if p1 and p2 then
+			local pos1, on1 = Camera:WorldToViewportPoint(p1.Position)
+			local pos2, on2 = Camera:WorldToViewportPoint(p2.Position)
+			if (on1 or on2) and pos1.Z > 0 and pos2.Z > 0 then
+				local lineFrame = modelLines[lineIndex]
+				if not lineFrame then
+					lineFrame = Instance.new("Frame")
+					lineFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+					lineFrame.BorderSizePixel = 0
+					lineFrame.Parent = DrawLayer
+					modelLines[lineIndex] = lineFrame
+				end
+				drawLineUI(lineFrame, Vector2.new(pos1.X, pos1.Y), Vector2.new(pos2.X, pos2.Y), color, 1.5)
+				lineIndex = lineIndex + 1
+			end
+		end
+	end
+
+	for i = lineIndex, #modelLines do
+		if modelLines[i] then modelLines[i].Visible = false end
+	end
+end
+
+local function clearSkeleton(model)
+	if skeletonPool[model] then
+		for _, lf in pairs(skeletonPool[model]) do
+			if lf then lf:Destroy() end
+		end
+		skeletonPool[model] = nil
+	end
+end
+
+local boxPool = {}
+
+local function getOrCreateBoxData(model)
+	if boxPool[model] then return boxPool[model] end
+	
+	local container = Instance.new("Frame", DrawLayer)
+	container.BackgroundTransparency = 1
+	container.Visible = false
+	
+	local boxFrame = Instance.new("Frame", container)
+	boxFrame.Size = UDim2.new(1, 0, 1, 0)
+	boxFrame.BackgroundTransparency = 1
+	local stroke = Instance.new("UIStroke", boxFrame)
+	stroke.Thickness = 1.4
+	
+	local hpBG = Instance.new("Frame", container)
+	hpBG.Size = UDim2.new(0, 3, 1, 0)
+	hpBG.Position = UDim2.new(0, -6, 0, 0)
+	hpBG.BackgroundColor3 = BLACK
+	hpBG.BorderSizePixel = 0
+	
+	local hpFill = Instance.new("Frame", hpBG)
+	hpFill.Size = UDim2.new(1, 0, 1, 0)
+	hpFill.AnchorPoint = Vector2.new(0, 1)
+	hpFill.Position = UDim2.new(0, 0, 1, 0)
+	hpFill.BorderSizePixel = 0
+	
+	local nameLbl = Instance.new("TextLabel", container)
+	nameLbl.Size = UDim2.new(0, 200, 0, 16)
+	nameLbl.AnchorPoint = Vector2.new(0.5, 1)
+	nameLbl.Position = UDim2.new(0.5, 0, 0, -3)
+	nameLbl.BackgroundTransparency = 1
+	nameLbl.Font = Enum.Font.Code
+	nameLbl.TextSize = 11
+	nameLbl.TextStrokeTransparency = 0.2
+	
+	local data = {Container = container, Stroke = stroke, HpBG = hpBG, HpFill = hpFill, NameLbl = nameLbl}
+	boxPool[model] = data
+	return data
+end
+
+local function clearBoxData(model)
+	if boxPool[model] then
+		if boxPool[model].Container then boxPool[model].Container:Destroy() end
+		boxPool[model] = nil
+	end
+end
+
+local espHighlights = {}
+local tracerFrames = {}
+local lookLaserFrames = {}
+
+-- ==========================================
+-- FX ЭФФЕКТЫ ПЕРСОНАЖА
+-- ==========================================
+local myPulse, myAuraParts, myHalo, myChinaHat, myCyberShield, myTrail, myTrailAtts = nil, {}, nil, nil, nil, nil, {}
+local myOrbs = {}
+
+local function togglePulse(on)
+	if myPulse then myPulse:Destroy() myPulse = nil end
+	if on then
+		local c = getChar() if not c then return end
+		myPulse = Instance.new("Highlight", SG)
+		myPulse.FillColor = Color3.fromRGB(0, 45, 20)
+		myPulse.FillTransparency = 0.45
+		myPulse.OutlineColor = currentThemeColor
+		myPulse.Adornee = c
+	end
+end
+
+local function toggleAura(on)
+	for _, p in ipairs(myAuraParts) do p:Destroy() end table.clear(myAuraParts)
+	if on then
+		local c = getChar() if not c then return end
+		for _, part in ipairs(c:GetChildren()) do
+			if part:IsA("BasePart") then
+				local att = Instance.new("Attachment", part)
+				local emit = Instance.new("ParticleEmitter", att)
+				emit.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+				emit.Color = ColorSequence.new(currentThemeColor)
+				emit.Rate = CFG.AuraRate
+				emit.Speed = NumberRange.new(1, 3)
+				emit.Size = NumberSequence.new(0.3, 0)
+				emit.LightEmission = 1
+				table.insert(myAuraParts, att)
+			end
+		end
+	end
+end
+
+local function toggleHalo(on)
+	if myHalo then myHalo:Destroy() myHalo = nil end
+	if on then
+		myHalo = Instance.new("Part", workspace)
+		myHalo.Name = "BaggetHalo"
+		myHalo.Size = Vector3.new(2.2, 0.12, 2.2)
+		myHalo.Color = currentThemeColor
+		myHalo.Material = Enum.Material.Neon
+		myHalo.Anchored = true
+		myHalo.CanCollide = false
+		myHalo.CastShadow = false
+		Instance.new("CylinderMesh", myHalo)
+	end
+end
+
+local function toggleChinaHat(on)
+	if myChinaHat then myChinaHat:Destroy() myChinaHat = nil end
+	if on then
+		myChinaHat = Instance.new("Part", workspace)
+		myChinaHat.Name = "BaggetChinaHat"
+		myChinaHat.Size = Vector3.new(3.2, 1.1, 3.2)
+		myChinaHat.Color = currentThemeColor
+		myChinaHat.Material = Enum.Material.Neon
+		myChinaHat.Transparency = 0.35
+		myChinaHat.Anchored = true
+		myChinaHat.CanCollide = false
+		myChinaHat.CastShadow = false
+		
+		local mesh = Instance.new("SpecialMesh", myChinaHat)
+		mesh.MeshType = Enum.MeshType.FileMesh
+		mesh.MeshId = "rbxassetid://1033714"
+		mesh.Scale = Vector3.new(1.7, 0.65, 1.7)
+	end
+end
+
+local function toggleCyberShield(on)
+	if myCyberShield then myCyberShield:Destroy() myCyberShield = nil end
+	if on then
+		myCyberShield = Instance.new("Part", workspace)
+		myCyberShield.Name = "BaggetShield"
+		myCyberShield.Shape = Enum.PartType.Ball
+		myCyberShield.Size = Vector3.new(7.5, 7.5, 7.5)
+		myCyberShield.Color = currentThemeColor
+		myCyberShield.Material = Enum.Material.ForceField
+		myCyberShield.Transparency = 0.25
+		myCyberShield.Anchored = true
+		myCyberShield.CanCollide = false
+		myCyberShield.CastShadow = false
+	end
+end
+
+local function toggleOrbitOrbs(on)
+	for _, orb in ipairs(myOrbs) do
+		if orb.Part then orb.Part:Destroy() end
+	end
+	table.clear(myOrbs)
+	if on then
+		for i = 1, 3 do
+			local p = Instance.new("Part", workspace)
+			p.Name = "BaggetOrb"
+			p.Shape = Enum.PartType.Ball
+			p.Size = Vector3.new(0.65, 0.65, 0.65)
+			p.Color = currentThemeColor
+			p.Material = Enum.Material.Neon
+			p.Anchored = true
+			p.CanCollide = false
+			p.CastShadow = false
+			
+			local a0 = Instance.new("Attachment", p) a0.Position = Vector3.new(0, 0.25, 0)
+			local a1 = Instance.new("Attachment", p) a1.Position = Vector3.new(0, -0.25, 0)
+			local tr = Instance.new("Trail", p)
+			tr.Attachment0 = a0
+			tr.Attachment1 = a1
+			tr.Lifetime = 0.35
+			tr.Color = ColorSequence.new(currentThemeColor)
+			tr.LightEmission = 1
+			tr.WidthScale = NumberSequence.new(1, 0)
+			
+			table.insert(myOrbs, {Part = p, Trail = tr, Offset = (i - 1) * ((math.pi * 2) / 3)})
+		end
+	end
+end
+
+local function toggleTrail(on)
+	if myTrail then myTrail:Destroy() myTrail = nil end
+	for _, a in pairs(myTrailAtts) do a:Destroy() end table.clear(myTrailAtts)
+	if on then
+		local r = getRoot() if not r then return end
+		local a0 = Instance.new("Attachment", r) a0.Position = Vector3.new(0, 1, 0)
+		local a1 = Instance.new("Attachment", r) a1.Position = Vector3.new(0, -1, 0)
+		table.insert(myTrailAtts, a0) table.insert(myTrailAtts, a1)
+		myTrail = Instance.new("Trail", r)
+		myTrail.Attachment0 = a0 myTrail.Attachment1 = a1
+		myTrail.Lifetime = CFG.TrailLength
+		myTrail.Color = ColorSequence.new(currentThemeColor)
+		myTrail.LightEmission = 1
+	end
+end
+
+-- ==========================================
+-- ГЛАВНЫЙ ЦИКЛ РЕНДЕРИНГА (RENDERSTEPPED)
+-- ==========================================
+local fxAngle = 0
+local fpsSmoothed = 60
+local lastHUDTick = 0
+
+bindConnection(RunService.RenderStepped, function(dt)
+	fxAngle = fxAngle + dt * 2.5
+	fpsSmoothed = math.floor(fpsSmoothed * 0.9 + (1 / math.max(dt, 0.001)) * 0.1)
+
+	-- Радужный режим (RGB Theme)
+	if S.RainbowMode then
+		currentThemeColor = Color3.fromHSV((tick() * 0.22) % 1, 0.85, 1)
+		P.BorderColor3 = currentThemeColor
+		TB.BorderColor3 = currentThemeColor
+		TL.TextColor3 = currentThemeColor
+		TelemetryBar.BorderColor3 = currentThemeColor
+		TelemetryText.TextColor3 = currentThemeColor
+		radarStroke.Color = currentThemeColor
+		fovStroke.Color = currentThemeColor
+		TargetHUDFrame.BorderColor3 = currentThemeColor
+		thudTitle.TextColor3 = currentThemeColor
+		if not S.TriggerIndicator then
+			chDot.BackgroundColor3 = currentThemeColor
+			for _, l in ipairs(chLines) do l.BackgroundColor3 = currentThemeColor end
+		end
+	else
+		currentThemeColor = GREEN
+	end
+
+	-- Freecam обновление
+	if S.Freecam then
+		local moveVec = Vector3.zero
+		if not UIS:GetFocusedTextBox() then
+			if UIS:IsKeyDown(Enum.KeyCode.W) then moveVec = moveVec + Vector3.new(0, 0, -1) end
+			if UIS:IsKeyDown(Enum.KeyCode.S) then moveVec = moveVec + Vector3.new(0, 0, 1) end
+			if UIS:IsKeyDown(Enum.KeyCode.A) then moveVec = moveVec + Vector3.new(-1, 0, 0) end
+			if UIS:IsKeyDown(Enum.KeyCode.D) then moveVec = moveVec + Vector3.new(1, 0, 0) end
+			if UIS:IsKeyDown(Enum.KeyCode.E) or UIS:IsKeyDown(Enum.KeyCode.Space) then moveVec = moveVec + Vector3.new(0, 1, 0) end
+			if UIS:IsKeyDown(Enum.KeyCode.Q) or UIS:IsKeyDown(Enum.KeyCode.LeftShift) then moveVec = moveVec + Vector3.new(0, -1, 0) end
+		end
+		
+		if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+			UIS.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+			local delta = UIS:GetMouseDelta()
+			freecamAngles = Vector2.new(
+				math.clamp(freecamAngles.X - delta.Y * 0.005, -math.rad(89), math.rad(89)),
+				freecamAngles.Y - delta.X * 0.005
+			)
+		else
+			UIS.MouseBehavior = Enum.MouseBehavior.Default
+		end
+		
+		local rotCF = CFrame.fromEulerAnglesYXZ(freecamAngles.X, freecamAngles.Y, 0)
+		local newPos = freecamCF.Position + (rotCF:VectorToWorldSpace(moveVec) * CFG.FreecamSpeed * dt * 2)
+		freecamCF = CFrame.new(newPos) * rotCF
+		Camera.CFrame = freecamCF
+	end
+
+	if S.CustomFOV then Camera.FieldOfView = CFG.CameraFOV end
+	if S.Fullbright then
+		Lighting.Brightness = 2.5
+		Lighting.FogEnd = 100000
+		Lighting.GlobalShadows = false
+		Lighting.Ambient = Color3.fromRGB(185, 185, 185)
+	end
+	if S.TimeChanger then Lighting.ClockTime = CFG.WorldTime end
+
+	local myChar = getChar()
+	local myHead = myChar and myChar:FindFirstChild("Head")
+	local myRoot = getRoot()
+
+	-- Троттлинг текстовых HUD (10 раз в секунду)
+	local now = tick()
+	if now - lastHUDTick > 0.1 then
+		lastHUDTick = now
+		TelemetryBar.Visible = S.TelemetryHUD
+		if S.TelemetryHUD then
+			local posStr = myRoot and string.format("%d, %d, %d", math.floor(myRoot.Position.X), math.floor(myRoot.Position.Y), math.floor(myRoot.Position.Z)) or "0, 0, 0"
+			local spd = myRoot and math.floor(Vector3.new(myRoot.AssemblyLinearVelocity.X, 0, myRoot.AssemblyLinearVelocity.Z).Magnitude) or 0
+			TelemetryText.Text = string.format("FPS: %d | SPD: %d st/s | POS: (%s) | ENTITIES: %d", fpsSmoothed, spd, posStr, #cachedTargetsList)
+		end
+
+		InspectorFrame.Visible = S.PartInspector
+		if S.PartInspector then
+			local t = Mouse.Target
+			if t then
+				InspectorText.Text = string.format(
+					"PART: %s [%s]\nSIZE: (%.1f, %.1f, %.1f)\nMAT: %s | ANCHOR: %s",
+					t.Name, t.ClassName, t.Size.X, t.Size.Y, t.Size.Z, tostring(t.Material.Name), tostring(t.Anchored)
+				)
+			else
+				InspectorText.Text = "PART INSPECTOR:\nTarget: [Sky / Void]"
+			end
+		end
+	end
+
+	-- 360 Radar HUD обновление
+	RadarFrame.Visible = S.RadarHUD
+	if S.RadarHUD and myRoot then
+		local targets = getValidTargets(false)
+		local camLook = Camera.CFrame.LookVector
+		local camYaw = math.atan2(-camLook.X, -camLook.Z)
+		local dotIdx = 1
+
+		for _, t in ipairs(targets) do
+			if t.RootPart then
+				local rel = t.RootPart.Position - myRoot.Position
+				local dist2D = Vector2.new(rel.X, rel.Z).Magnitude
+				if dist2D <= CFG.RadarRange then
+					local angle = math.atan2(rel.X, rel.Z) - camYaw
+					local normDist = (dist2D / CFG.RadarRange) * 68
+					local px = 75 + math.sin(angle) * normDist
+					local py = 75 - math.cos(angle) * normDist
+
+					local dot = radarDotsPool[dotIdx]
+					if not dot then
+						dot = Instance.new("Frame", RadarFrame)
+						dot.Size = UDim2.new(0, 5, 0, 5)
+						dot.AnchorPoint = Vector2.new(0.5, 0.5)
+						Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+						radarDotsPool[dotIdx] = dot
+					end
+					dot.Position = UDim2.fromOffset(px, py)
+					dot.BackgroundColor3 = t.IsPlayer and CFG.Color_PlayerVisible or CFG.Color_BotVisible
+					dot.Visible = true
+					dotIdx = dotIdx + 1
+				end
+			end
+		end
+		for i = dotIdx, #radarDotsPool do
+			if radarDotsPool[i] then radarDotsPool[i].Visible = false end
+		end
+	end
+
+	-- Обновление 3D эффектов персонажа
+	if S.Halo and myHalo and myHead then
+		myHalo.CFrame = CFrame.new(myHead.Position + Vector3.new(0, 1.45, 0)) * CFrame.Angles(0, fxAngle, 0)
+		if S.RainbowMode then myHalo.Color = currentThemeColor end
+	end
+	if S.ChinaHat and myChinaHat and myHead then
+		myChinaHat.CFrame = CFrame.new(myHead.Position + Vector3.new(0, 1.15, 0)) * CFrame.Angles(0, -fxAngle, 0)
+		if S.RainbowMode then myChinaHat.Color = currentThemeColor end
+	end
+	if S.CyberShield and myCyberShield and myRoot then
+		myCyberShield.CFrame = CFrame.new(myRoot.Position) * CFrame.Angles(fxAngle * 0.5, fxAngle, 0)
+		if S.RainbowMode then myCyberShield.Color = currentThemeColor end
+	end
+	if S.OrbitOrbs and myRoot and #myOrbs > 0 then
+		for _, orb in ipairs(myOrbs) do
+			if orb.Part and orb.Part.Parent then
+				local a = fxAngle * 1.4 + orb.Offset
+				local offsetPos = Vector3.new(math.cos(a) * 4.2, math.sin(a * 2) * 1.3, math.sin(a) * 4.2)
+				orb.Part.Position = myRoot.Position + offsetPos
+				if S.RainbowMode then
+					orb.Part.Color = currentThemeColor
+					orb.Trail.Color = ColorSequence.new(currentThemeColor)
+				end
+			end
+		end
+	end
+	if S.Pulse and myPulse and S.RainbowMode then
+		myPulse.OutlineColor = currentThemeColor
+	end
+
+	-- FOV и Прицел
+	FOVFrame.Visible = S.Aimbot and CFG.ShowFOV
+	if FOVFrame.Visible then
+		FOVFrame.Size = UDim2.fromOffset(CFG.AimFOV * 2, CFG.AimFOV * 2)
+	end
+	
+	CustomCrosshair.Visible = S.Crosshair
+	if S.Crosshair then
+		CustomCrosshair.Rotation = (CustomCrosshair.Rotation + dt * 45) % 360
+		if S.TriggerIndicator and Mouse.Target then
+			local model = Mouse.Target:FindFirstAncestorOfClass("Model")
+			local hum = model and model:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 and model ~= myChar then
+				chDot.BackgroundColor3 = RED
+				for _, l in ipairs(chLines) do l.BackgroundColor3 = RED end
+			else
+				chDot.BackgroundColor3 = currentThemeColor
+				for _, l in ipairs(chLines) do l.BackgroundColor3 = currentThemeColor end
+			end
+		else
+			chDot.BackgroundColor3 = currentThemeColor
+			for _, l in ipairs(chLines) do l.BackgroundColor3 = currentThemeColor end
+		end
+	end
+
+	-- 1. ESP Highlights
+	if S.ESP then
+		local targets = getValidTargets(CFG.ESP_TeamCheck)
+		local activeModels = {}
+		for _, target in ipairs(targets) do
+			if checkDistance(target.RootPart, CFG.ESP_MaxDist) then
+				local model = target.Model
+				local visible = isVisible(target.RootPart)
+				if not (CFG.ESP_WallCheck and not visible) then
+					activeModels[model] = true
+					local hl = espHighlights[model]
+					if not hl or hl.Parent ~= SG then
+						if hl then hl:Destroy() end
+						hl = Instance.new("Highlight")
+						hl.Name = "BaggetESP"
+						hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+						hl.Parent = SG
+						espHighlights[model] = hl
+					end
+					hl.Enabled = true
+					hl.Adornee = model
+					local col = target.IsPlayer and (visible and CFG.Color_PlayerVisible or CFG.Color_PlayerHidden) or (visible and CFG.Color_BotVisible or CFG.Color_BotHidden)
+					hl.FillColor = col
+					hl.OutlineColor = col
+					hl.FillTransparency = visible and 0.58 or 0.8
+				end
+			end
+		end
+		for model, hl in pairs(espHighlights) do
+			if not model or not model.Parent or not activeModels[model] then
+				if hl then hl:Destroy() end
+				espHighlights[model] = nil
+			end
+		end
+	else
+		for model, hl in pairs(espHighlights) do
+			if hl then hl:Destroy() end
+			espHighlights[model] = nil
+		end
+	end
+
+	-- 2. 2D Box ESP + HealthBar + Name & Distance
+	if S.BoxESP or S.HealthESP or S.NameESP then
+		local targets = getValidTargets(CFG.ESP_TeamCheck)
+		local activeBoxes = {}
+		local myPos = myRoot and myRoot.Position or Camera.CFrame.Position
+
+		for _, target in ipairs(targets) do
+			local hrp = target.RootPart
+			local hum = target.Humanoid
+			local model = target.Model
+			if hrp and hum and checkDistance(hrp, CFG.ESP_MaxDist) then
+				local visible = isVisible(hrp)
+				if not (CFG.ESP_WallCheck and not visible) then
+					local topPos, onTop = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3.2, 0))
+					local botPos, onBot = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.5, 0))
+					if (onTop or onBot) and topPos.Z > 0 and botPos.Z > 0 then
+						activeBoxes[model] = true
+						local bData = getOrCreateBoxData(model)
+						local height = math.abs(botPos.Y - topPos.Y)
+						local width = height * 0.58
+						
+						bData.Container.Position = UDim2.fromOffset(topPos.X - width / 2, topPos.Y)
+						bData.Container.Size = UDim2.fromOffset(width, height)
+						bData.Container.Visible = true
+						
+						local col = target.IsPlayer and (visible and CFG.Color_PlayerVisible or CFG.Color_PlayerHidden) or (visible and CFG.Color_BotVisible or CFG.Color_BotHidden)
+						bData.Stroke.Enabled = S.BoxESP
+						bData.Stroke.Color = col
+						
+						bData.HpBG.Visible = S.HealthESP
+						if S.HealthESP then
+							local hpRatio = math.clamp(hum.Health / math.max(1, hum.MaxHealth), 0, 1)
+							bData.HpFill.Size = UDim2.new(1, 0, hpRatio, 0)
+							bData.HpFill.BackgroundColor3 = Color3.fromHSV(hpRatio * 0.33, 0.9, 1)
+						end
+						
+						bData.NameLbl.Visible = S.NameESP
+						if S.NameESP then
+							local dist = math.floor((myPos - hrp.Position).Magnitude)
+							bData.NameLbl.Text = string.format("%s [%dm]", target.Name, dist)
+							bData.NameLbl.TextColor3 = col
+						end
+					end
+				end
+			end
+		end
+		for model, _ in pairs(boxPool) do
+			if not activeBoxes[model] then clearBoxData(model) end
+		end
+	else
+		for model, _ in pairs(boxPool) do clearBoxData(model) end
+	end
+
+	-- 3. Look-Vector Laser ESP
+	if S.LookLaserESP then
+		local targets = getValidTargets(CFG.ESP_TeamCheck)
+		local activeLasers = {}
+		for _, target in ipairs(targets) do
+			local model = target.Model
+			local head = model:FindFirstChild("Head") or target.RootPart
+			if head and checkDistance(head, CFG.ESP_MaxDist) then
+				local p1, on1 = Camera:WorldToViewportPoint(head.Position)
+				local p2, on2 = Camera:WorldToViewportPoint(head.Position + head.CFrame.LookVector * 8)
+				if (on1 or on2) and p1.Z > 0 and p2.Z > 0 then
+					activeLasers[model] = true
+					local lf = lookLaserFrames[model]
+					if not lf then
+						lf = Instance.new("Frame")
+						lf.AnchorPoint = Vector2.new(0.5, 0.5)
+						lf.BorderSizePixel = 0
+						lf.Parent = DrawLayer
+						lookLaserFrames[model] = lf
+					end
+					drawLineUI(lf, Vector2.new(p1.X, p1.Y), Vector2.new(p2.X, p2.Y), Color3.fromRGB(255, 50, 80), 1.8)
+				end
+			end
+		end
+		for model, lf in pairs(lookLaserFrames) do
+			if not model or not model.Parent or not activeLasers[model] then
+				if lf then lf:Destroy() end
+				lookLaserFrames[model] = nil
+			end
+		end
+	else
+		for model, lf in pairs(lookLaserFrames) do
+			if lf then lf:Destroy() end
+			lookLaserFrames[model] = nil
+		end
+	end
+
+	-- 4. Skeleton ESP
+	if S.Skeleton then
+		local targets = getValidTargets(CFG.SkeletonTeamCheck)
+		local activeSkeletons = {}
+		for _, target in ipairs(targets) do
+			if checkDistance(target.RootPart, CFG.Skeleton_MaxDist) then
+				local model = target.Model
+				local visible = isVisible(target.RootPart)
+				if not (CFG.Skeleton_WallCheck and not visible) then
+					activeSkeletons[model] = true
+					local col = target.IsPlayer and (visible and CFG.Color_PlayerVisible or CFG.Color_PlayerHidden) or (visible and CFG.Color_BotVisible or CFG.Color_BotHidden)
+					updateSkeletonForModel(model, col)
+				end
+			end
+		end
+		for model, _ in pairs(skeletonPool) do
+			if not activeSkeletons[model] then clearSkeleton(model) end
+		end
+	else
+		for model, _ in pairs(skeletonPool) do clearSkeleton(model) end
+	end
+
+	-- 5. Tracers
+	if S.Tracers then
+		local targets = getValidTargets(CFG.TracerTeamCheck)
+		local activeKeys = {}
+		local originScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+
+		for _, target in ipairs(targets) do
+			local hrp = target.RootPart
+			local model = target.Model
+			if hrp and checkDistance(hrp, CFG.Tracer_MaxDist) then
+				local visible = isVisible(hrp)
+				if not (CFG.Tracer_WallCheck and not visible) then
+					local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+					if onScreen and screenPos.Z > 0 then
+						activeKeys[model] = true
+						local lf = tracerFrames[model]
+						if not lf then
+							lf = Instance.new("Frame")
+							lf.AnchorPoint = Vector2.new(0.5, 0.5)
+							lf.BorderSizePixel = 0
+							lf.Parent = DrawLayer
+							tracerFrames[model] = lf
+						end
+						local col = target.IsPlayer and (visible and CFG.Color_PlayerVisible or CFG.Color_PlayerHidden) or (visible and CFG.Color_BotVisible or CFG.Color_BotHidden)
+						drawLineUI(lf, originScreen, Vector2.new(screenPos.X, screenPos.Y), col, 1.4)
+					end
+				end
+			end
+		end
+		for model, lf in pairs(tracerFrames) do
+			if not model or not model.Parent or not activeKeys[model] then
+				if lf then lf:Destroy() end
+				tracerFrames[model] = nil
+			end
+		end
+	else
+		for model, lf in pairs(tracerFrames) do
+			if lf then lf:Destroy() end
+			tracerFrames[model] = nil
+		end
+	end
+
+	-- 6. Aimbot & Target HUD
+	local lockedTarget = nil
+	if S.Aimbot and not S.Freecam then
+		local targets = getValidTargets(CFG.AimTeamCheck)
+		local closestPart = nil
+		local shortestDist = CFG.AimFOV
+		local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+		for _, target in ipairs(targets) do
+			local model = target.Model
+			local part = model:FindFirstChild(CFG.AimPart)
+			if not part and CFG.AimPart == "Torso" then
+				part = model:FindFirstChild("UpperTorso") or model:FindFirstChild("LowerTorso")
+			end
+			part = part or target.RootPart
+
+			if part and checkDistance(part, CFG.Aim_MaxDist) then
+				local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+				if onScreen and screenPos.Z > 0 then
+					local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+					if dist < shortestDist then
+						if not CFG.Aim_WallCheck or isVisible(part) then
+							shortestDist = dist
+							closestPart = part
+							lockedTarget = target
+						end
+					end
+				end
+			end
+		end
+
+		if closestPart and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+			local targetPos = closestPart.Position
+			if CFG.AimPrediction then
+				local targetRoot = closestPart.Parent:FindFirstChild("HumanoidRootPart") or closestPart
+				if targetRoot and targetRoot:IsA("BasePart") then
+					targetPos = targetPos + (targetRoot.AssemblyLinearVelocity * CFG.PredictionFactor)
+				end
+			end
+
+			local goalCF = CFrame.new(Camera.CFrame.Position, targetPos)
+			if CFG.AimSmoothness > 1 then
+				local alpha = math.clamp((dt * 60) / CFG.AimSmoothness, 0.05, 1)
+				Camera.CFrame = Camera.CFrame:Lerp(goalCF, alpha)
+			else
+				Camera.CFrame = goalCF
+			end
+		end
+	end
+
+	if S.Aimbot and S.TargetHUD and lockedTarget and lockedTarget.Humanoid then
+		TargetHUDFrame.Visible = true
+		local hum = lockedTarget.Humanoid
+		local dist = myRoot and math.floor((myRoot.Position - lockedTarget.RootPart.Position).Magnitude) or 0
+		thudTitle.Text = "TARGET: " .. tostring(lockedTarget.Name)
+		thudSub.Text = string.format("HP: %d/%d | DIST: %dm", math.floor(hum.Health), math.floor(hum.MaxHealth), dist)
+		local ratio = math.clamp(hum.Health / math.max(1, hum.MaxHealth), 0, 1)
+		thudBarFill.Size = UDim2.new(ratio, 0, 1, 0)
+		thudBarFill.BackgroundColor3 = Color3.fromHSV(ratio * 0.33, 0.9, 1)
+	else
+		TargetHUDFrame.Visible = false
+	end
+end)
+
+-- ==========================================
+-- СБОРКА КАТЕГОРИЙ И РАЗДЕЛОВ МЕНЮ
+-- ==========================================
+
+-- 1. Передвижение и Физика
+local catMove = makeCategory("MOVEMENT & PHYSICS (ДВИЖЕНИЕ)", true)
+makeSlider(catMove, "WalkSpeed", 16, 250, 16, function(v) CFG.Speed = v local h = getHum() if h then h.WalkSpeed = v end end)
+makeSlider(catMove, "JumpPower", 0, 300, 50, function(v) CFG.Jump = v local h = getHum() if h then h.UseJumpPower = true h.JumpPower = v end end)
+makeSlider(catMove, "World Gravity (Гравитация)", 0, 400, CFG.Gravity, function(v) CFG.Gravity = v workspace.Gravity = v end)
+makeButton(catMove, "[⚡] Forward Dash (Рывок - Клавиша V)", DARK_GREEN, performDash)
+makeSlider(catMove, "Dash Power", 40, 250, 95, function(v) CFG.DashPower = v end)
+makeToggle(catMove, "Lock Speed/Jump (Фиксация)", false, function(on) S.SpeedLock = on end)
+makeToggle(catMove, "Spider Climb (Лазать по стенам)", false, function(on) S.SpiderClimb = on end)
+makeSlider(catMove, "Spider Climb Speed", 15, 100, 35, function(v) CFG.SpiderSpeed = v end)
+makeToggle(catMove, "Auto Bunnyhop (Распрыжка)", false, function(on) S.AutoBhop = on end)
+makeToggle(catMove, "Infinite Jump (Беск. прыжок)", false, function(on) S.InfiniteJump = on end)
+makeToggle(catMove, "Air Walk (Платформа - Выше E / Ниже Q)", false, function(on) S.AirWalk = on toggleAirWalk(on) end)
+makeToggle(catMove, "Freeze Character (Заморозка)", false, function(on)
+	S.FreezeChar = on
+	local r = getRoot()
+	if r then r.Anchored = on end
+end)
+makeToggle(catMove, "Noclip (Сквозь стены)", false, function(on) S.Noclip = on if on then enableNoclip() else disableNoclip() end end)
+makeToggle(catMove, "Anti-Fling (Защита от толчков)", false, function(on) S.AntiFling = on if not on then restoreAntiFling() end end)
+makeToggle(catMove, "Anti-Void (Возврат при падении)", true, function(on) S.AntiVoid = on end)
+makeToggle(catMove, "Fly Mode (Полет WASD + Space/Shift)", false, function(on) S.Fly = on if on then startFly() else stopFly() end end)
+makeSlider(catMove, "Fly Speed", 10, 300, 65, function(v) CFG.FlySpeed = v end)
+makeToggle(catMove, "Spinbot (Вращение)", false, function(on) S.Spinbot = on end)
+makeSlider(catMove, "Spinbot Speed", 5, 100, 25, function(v) CFG.SpinSpeed = v end)
+
+-- 2. Инструменты Строителя и Песочница (Sandbox & BTools)
+local catSandbox = makeCategory("STUDIO SANDBOX & BTOOLS (ПЕСОЧНИЦА)", false)
+makeToggle(catSandbox, "Part Inspector HUD (Инспектор)", false, function(on) S.PartInspector = on end)
+makeToggle(catSandbox, "BTools Hotkeys (Alt + R:Удал / C:Клон / A:Якорь)", false, function(on) S.BToolsHotkeys = on end)
+makeToggle(catSandbox, "Black Hole (Притяжение объектов)", false, function(on) S.BlackHole = on if not on then restoreBlackHoleParts() end end)
+makeSlider(catSandbox, "Black Hole Distance", 5, 60, 15, function(v) CFG.BlackHoleDist = v end)
+makeSlider(catSandbox, "Black Hole Radius", 20, 250, 80, function(v) CFG.BlackHoleRadius = v end)
+makeButton(catSandbox, "[+] Spawn Neon Block Under Feet", DARK_GREEN, function()
+	local r = getRoot()
+	if r then
+		local p = trackPart(Instance.new("Part", workspace))
+		p.Size = Vector3.new(8, 1, 8)
+		p.Position = r.Position - Vector3.new(0, getGroundOffset() + 0.5, 0)
+		p.Anchored = true
+		p.Material = Enum.Material.Neon
+		p.Color = currentThemeColor
+	end
+end)
+makeButton(catSandbox, "[🗑️] Clear Spawned Sandbox Parts", RED, function()
+	for _, p in ipairs(SpawnedParts) do
+		if p and p.Parent then p:Destroy() end
+	end
+	table.clear(SpawnedParts)
+end)
+
+-- 3. Взаимодействие с игроками (Spectate / Orbit / TP)
+local catInteract = makeCategory("PLAYER INTERACTION (ИГРОКИ И БОТЫ)", false)
+targetLabelUI = makeButton(catInteract, "Цель: [Нажми для поиска]", ELEM_BG, function() cycleSelectedTarget(1) end)
+makeButton(catInteract, "[►] Следующая цель (Next)", DARK_GREEN, function() cycleSelectedTarget(1) end)
+makeButton(catInteract, "[◄] Предыдущая цель (Prev)", DARK_GREEN, function() cycleSelectedTarget(-1) end)
+makeButton(catInteract, "[👁] Наблюдать (Spectate Target)", DARK_GREEN, function()
+	if currentSelectedTarget and currentSelectedTarget.Humanoid then
+		Camera.CameraSubject = currentSelectedTarget.Humanoid
+	end
+end)
+makeButton(catInteract, "[↩] Вернуть камеру к себе", ELEM_BG, function()
+	local h = getHum()
+	if h then Camera.CameraSubject = h end
+end)
+makeButton(catInteract, "[⚡] Телепорт к цели (TP to Target)", DARK_GREEN, function()
+	local r = getRoot()
+	if r and currentSelectedTarget and currentSelectedTarget.RootPart then
+		r.CFrame = currentSelectedTarget.RootPart.CFrame * CFrame.new(0, 0, 3)
+	end
+end)
+makeToggle(catInteract, "Orbit Target (Вращаться вокруг)", false, function(on) S.OrbitTarget = on end)
+makeSlider(catInteract, "Orbit Radius", 3, 25, 8, function(v) CFG.OrbitRadius = v end)
+makeSlider(catInteract, "Orbit Speed", 1, 15, 4, function(v) CFG.OrbitSpeed = v end)
+
+-- 4. Аимбот и Бой
+local catAim = makeCategory("COMBAT & AIMBOT (БОЙ И НАВОДКА)", false)
+makeToggle(catAim, "Aimbot Active (Удерж. ПКМ)", false, function(on) S.Aimbot = on end)
+makeToggle(catAim, "Target Info HUD (Панель цели)", true, function(on) S.TargetHUD = on end)
+makeToggle(catAim, "Aim Prediction (Упреждение)", true, function(on) CFG.AimPrediction = on end)
+makeSlider(catAim, "Prediction Factor (%)", 1, 35, 12, function(v) CFG.PredictionFactor = v / 100 end)
+makeToggle(catAim, "Aim WallCheck (Проверка стен)", false, function(on) CFG.Aim_WallCheck = on end)
+makeToggle(catAim, "Aim Team Check", false, function(on) CFG.AimTeamCheck = on end)
+makeToggle(catAim, "Show FOV Circle", false, function(on) CFG.ShowFOV = on end)
+makeToggle(catAim, "Cyber Crosshair (Прицел)", false, function(on) S.Crosshair = on end)
+makeToggle(catAim, "Trigger Indicator (Красный на враге)", false, function(on) S.TriggerIndicator = on end)
+makeSlider(catAim, "Aimbot FOV", 30, 500, 150, function(v) CFG.AimFOV = v end)
+makeSlider(catAim, "Aim Smoothness", 1, 25, 4, function(v) CFG.AimSmoothness = v end)
+makeToggle(catAim, "Hitbox Expander (Хитбоксы)", false, function(on) S.HitboxExpander = on if not on then resetHitboxes() end end)
+makeSlider(catAim, "Hitbox Size", 2, 25, 6, function(v) CFG.HitboxSize = v end)
+makeToggle(catAim, "Big Heads (Большие головы)", false, function(on) S.BigHeads = on if not on then resetBigHeads() end end)
+makeSlider(catAim, "Head Scale", 2, 12, 4, function(v) CFG.HeadScale = v end)
+
+-- Возвращенные переключатели части тела AimPart
+local setHead, setTorso, setRoot
+setHead = makeToggle(catAim, "Aim Part: Head (Голова)", true, function(on)
+	if on then CFG.AimPart = "Head" if setTorso then setTorso(false) end if setRoot then setRoot(false) end end
+end)
+setTorso = makeToggle(catAim, "Aim Part: Torso (Корпус)", false, function(on)
+	if on then CFG.AimPart = "Torso" if setHead then setHead(false) end if setRoot then setRoot(false) end end
+end)
+setRoot = makeToggle(catAim, "Aim Part: RootPart (Центр)", false, function(on)
+	if on then CFG.AimPart = "HumanoidRootPart" if setHead then setHead(false) end if setTorso then setTorso(false) end end
+end)
+
+-- 5. Визуалы и ESP
+local catESP = makeCategory("VISUALS & ESP (ВАЛЛХАК И РАДАР)", false)
+makeToggle(catESP, "360° Radar HUD (Мини-радар)", false, function(on) S.RadarHUD = on end)
+makeSlider(catESP, "Radar Range (Дистанция)", 50, 1000, 250, function(v) CFG.RadarRange = v end)
+makeToggle(catESP, "Highlight Chams (Силуэты)", false, function(on) S.ESP = on end)
+makeToggle(catESP, "2D Box ESP (Боксы)", false, function(on) S.BoxESP = on end)
+makeToggle(catESP, "Health Bar ESP (Полоска ХП)", false, function(on) S.HealthESP = on end)
+makeToggle(catESP, "Name & Distance ESP (Имена)", false, function(on) S.NameESP = on end)
+makeToggle(catESP, "Look-Vector Laser (Куда смотрят)", false, function(on) S.LookLaserESP = on end)
+makeToggle(catESP, "ESP WallCheck (Скрывать за стеной)", false, function(on) CFG.ESP_WallCheck = on end)
+makeToggle(catESP, "ESP Team Check", false, function(on) CFG.ESP_TeamCheck = on end)
+makeToggle(catESP, "Skeleton ESP (Кости)", false, function(on) S.Skeleton = on end)
+makeToggle(catESP, "Skeleton WallCheck", false, function(on) CFG.Skeleton_WallCheck = on end)
+makeToggle(catESP, "Skeleton Team Check", false, function(on) CFG.SkeletonTeamCheck = on end)
+makeToggle(catESP, "Tracers (Линии к врагам)", false, function(on) S.Tracers = on end)
+makeToggle(catESP, "Tracer WallCheck", false, function(on) CFG.Tracer_WallCheck = on end)
+makeToggle(catESP, "Tracer Team Check", false, function(on) CFG.TracerTeamCheck = on end)
+
+-- 6. Эффекты Персонажа и Мир
+local catFX = makeCategory("WORLD, CAMERA & FX (ЭФФЕКТЫ)", false)
+makeToggle(catFX, "Top Telemetry HUD (FPS/Speed)", true, function(on) S.TelemetryHUD = on end)
+makeToggle(catFX, "RGB Rainbow Theme (Радуга)", false, function(on) S.RainbowMode = on end)
+makeToggle(catFX, "X-Ray Walls (Прозрачные стены)", false, function(on) S.XRay = on toggleXRay(on) end)
+makeToggle(catFX, "Freecam (Свободная камера - ПКМ обзор)", false, function(on) S.Freecam = on toggleFreecam(on) end)
+makeSlider(catFX, "Freecam Speed", 10, 200, 50, function(v) CFG.FreecamSpeed = v end)
+makeToggle(catFX, "China Hat (Кибер-шляпа)", false, function(on) S.ChinaHat = on toggleChinaHat(on) end)
+makeToggle(catFX, "Orbiting Orbs (Сферы вокруг)", false, function(on) S.OrbitOrbs = on toggleOrbitOrbs(on) end)
+makeToggle(catFX, "Cyber Forcefield (Энерго-щит)", false, function(on) S.CyberShield = on toggleCyberShield(on) end)
+makeToggle(catFX, "Footstep Shockwaves (Волны шагов)", false, function(on) S.StepWaves = on end)
+makeToggle(catFX, "Cyber Halo (Нимб)", false, function(on) S.Halo = on toggleHalo(on) end)
+makeToggle(catFX, "Neon Pulse (Подсветка себя)", false, function(on) S.Pulse = on togglePulse(on) end)
+makeToggle(catFX, "Full-Body Aura (Партиклы)", false, function(on) S.Aura = on toggleAura(on) end)
+makeToggle(catFX, "Neon Trail (Шлейф за спиной)", false, function(on) S.Trail = on toggleTrail(on) end)
+makeToggle(catFX, "Fullbright (Яркий мир)", false, function(on)
+	S.Fullbright = on
+	if not on then
+		Lighting.Brightness = OrigWorld.Brightness
+		Lighting.FogEnd = OrigWorld.FogEnd
+		Lighting.GlobalShadows = OrigWorld.GlobalShadows
+		Lighting.Ambient = OrigWorld.Ambient
+	end
+end)
+makeToggle(catFX, "Custom Time Changer (Время)", false, function(on)
+	S.TimeChanger = on
+	if not on then Lighting.ClockTime = OrigWorld.ClockTime end
+end)
+makeSlider(catFX, "World Time (Часы)", 0, 24, 14, function(v) CFG.WorldTime = v end)
+makeToggle(catFX, "Custom Camera FOV", false, function(on)
+	S.CustomFOV = on
+	if not on then Camera.FieldOfView = OrigWorld.FOV end
+end)
+makeSlider(catFX, "Camera FOV", 50, 120, 90, function(v) CFG.CameraFOV = v end)
+makeToggle(catFX, "Infinite Zoom (Отдаление камеры)", false, function(on)
+	S.InfiniteZoom = on
+	LP.CameraMaxZoomDistance = on and 99999 or 400
+end)
+
+-- 7. Цели и Цвета
+local catTargets = makeCategory("TARGETS & COLORS (ЦЕЛИ И ЦВЕТА)", false)
+makeToggle(catTargets, "Target Players (Игроки)", true, function(on) CFG.TargetPlayers = on end)
+makeToggle(catTargets, "Target Bots (NPC / Боты)", true, function(on) CFG.TargetBots = on end)
+makeSlider(catTargets, "ESP Max Distance", 50, 5000, 1500, function(v) CFG.ESP_MaxDist = v end)
+makeSlider(catTargets, "Aimbot Max Distance", 50, 5000, 1500, function(v) CFG.Aim_MaxDist = v end)
+makeColorPicker(catTargets, "Player: Visible", CFG.Color_PlayerVisible, function(c) CFG.Color_PlayerVisible = c end)
+makeColorPicker(catTargets, "Player: Behind Wall", CFG.Color_PlayerHidden, function(c) CFG.Color_PlayerHidden = c end)
+makeColorPicker(catTargets, "Bot: Visible", CFG.Color_BotVisible, function(c) CFG.Color_BotVisible = c end)
+makeColorPicker(catTargets, "Bot: Behind Wall", CFG.Color_BotHidden, function(c) CFG.Color_BotHidden = c end)
+
+-- 8. Телепорты и Вейпоинты
+local catTP = makeCategory("TELEPORTS & WAYPOINTS (ТЕЛЕПОРТЫ)", false)
+makeToggle(catTP, "Ctrl + Click TP (ТП по клику)", false, function(on) S.CtrlClickTP = on end)
+makeToggle(catTP, "Alt + Click Impulse (Толчок объектов)", false, function(on) S.AltClickImpulse = on end)
+makeButton(catTP, "[!] SAVE ME (ПОДБРОСИТЬ ВВЕРХ)", DARK_GREEN, function()
+	local r = getRoot()
+	if r then
+		r.CFrame = r.CFrame + Vector3.new(0, 65, 0)
+		r.AssemblyLinearVelocity = Vector3.zero
+	end
+end)
+
+local wpCreator = Instance.new("Frame")
+wpCreator.Size = UDim2.new(1, 0, 0, 58)
+wpCreator.BackgroundColor3 = ELEM_BG
+wpCreator.BackgroundTransparency = 0.2
+wpCreator.BorderSizePixel = 1
+wpCreator.BorderColor3 = DARK_GREEN
+wpCreator.LayoutOrder = nextOrder()
+wpCreator.Parent = catTP
+Instance.new("UICorner", wpCreator).CornerRadius = UDim.new(0, 4)
+
+local wpInput = Instance.new("TextBox")
+wpInput.Size = UDim2.new(1, -12, 0, 22)
+wpInput.Position = UDim2.new(0, 6, 0, 5)
+wpInput.BackgroundColor3 = BLACK
+wpInput.BorderSizePixel = 1
+wpInput.BorderColor3 = DARK_GREEN
+wpInput.Text = ""
+wpInput.PlaceholderText = "Название точки..."
+wpInput.PlaceholderColor3 = Color3.fromRGB(100, 110, 115)
+wpInput.TextColor3 = TXT
+wpInput.TextSize = 10
+wpInput.Font = Enum.Font.Code
+wpInput.ClearTextOnFocus = false
+wpInput.Parent = wpCreator
+
+local addWpBtn = Instance.new("TextButton")
+addWpBtn.Size = UDim2.new(1, -12, 0, 22)
+addWpBtn.Position = UDim2.new(0, 6, 0, 31)
+addWpBtn.BackgroundColor3 = DARK_GREEN
+addWpBtn.Text = "[+ SAVE CURRENT POS]"
+addWpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+addWpBtn.TextSize = 11
+addWpBtn.Font = Enum.Font.Code
+addWpBtn.Parent = wpCreator
+Instance.new("UICorner", addWpBtn).CornerRadius = UDim.new(0, 4)
+
+local wpList = Instance.new("Frame")
+wpList.Size = UDim2.new(1, 0, 0, 0)
+wpList.AutomaticSize = Enum.AutomaticSize.Y
+wpList.BackgroundTransparency = 1
+wpList.LayoutOrder = nextOrder()
+wpList.Parent = catTP
+
+local wpLayout = Instance.new("UIListLayout")
+wpLayout.Padding = UDim.new(0, 3)
+wpLayout.Parent = wpList
+
+local wpCount = 0
+local function createWaypointItem(name, cframe)
+	local item = Instance.new("Frame")
+	item.Size = UDim2.new(1, 0, 0, 26)
+	item.BackgroundColor3 = ELEM_BG
+	item.BorderSizePixel = 1
+	item.BorderColor3 = DARK_GREEN
+	item.Parent = wpList
+	Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
+	
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -78, 1, 0)
+	lbl.Position = UDim2.new(0, 8, 0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = "• " .. name
+	lbl.TextColor3 = TXT
+	lbl.TextSize = 11
+	lbl.Font = Enum.Font.Code
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.TextTruncate = Enum.TextTruncate.AtEnd
+	lbl.Parent = item
+	
+	local tpBtn = Instance.new("TextButton")
+	tpBtn.Size = UDim2.new(0, 38, 0, 20)
+	tpBtn.Position = UDim2.new(1, -68, 0, 3)
+	tpBtn.BackgroundColor3 = DARK_GREEN
+	tpBtn.Text = "TP"
+	tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	tpBtn.TextSize = 11
+	tpBtn.Font = Enum.Font.Code
+	tpBtn.Parent = item
+	Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0, 3)
+	
+	local delBtn = Instance.new("TextButton")
+	delBtn.Size = UDim2.new(0, 22, 0, 20)
+	delBtn.Position = UDim2.new(1, -26, 0, 3)
+	delBtn.BackgroundColor3 = RED
+	delBtn.Text = "X"
+	delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	delBtn.TextSize = 11
+	delBtn.Font = Enum.Font.Code
+	delBtn.Parent = item
+	Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 3)
+	
+	tpBtn.MouseButton1Click:Connect(function()
+		local r = getRoot()
+		if r then r.CFrame = cframe end
+	end)
+	delBtn.MouseButton1Click:Connect(function() item:Destroy() end)
+end
+
+addWpBtn.MouseButton1Click:Connect(function()
+	local r = getRoot()
+	if not r then return end
+	wpCount = wpCount + 1
+	local name = wpInput.Text
+	if name == "" or name:match("^%s*$") then name = "Point " .. wpCount end
+	wpInput.Text = ""
+	createWaypointItem(name, r.CFrame)
+end)
+
+-- ==========================================
+-- СИСТЕМА ПОЛНОЙ ВЫГРУЗКИ (UNLOAD & CLEANUP)
+-- ==========================================
+local function fullCleanup()
+	for _, c in ipairs(Connections) do
+		if c.Connected then c:Disconnect() end
+	end
+	table.clear(Connections)
+	
+	for _, p in ipairs(SpawnedParts) do
+		if p and p.Parent then p:Destroy() end
+	end
+	table.clear(SpawnedParts)
+
+	disableNoclip()
+	stopFly()
+	toggleXRay(false)
+	toggleAirWalk(false)
+	toggleFreecam(false)
+	restoreBlackHoleParts()
+	restoreAntiFling()
+	resetHitboxes()
+	resetBigHeads()
+	togglePulse(false)
+	toggleAura(false)
+	toggleHalo(false)
+	toggleChinaHat(false)
+	toggleCyberShield(false)
+	toggleOrbitOrbs(false)
+	toggleTrail(false)
+	
+	local r = getRoot()
+	if r then r.Anchored = false end
+
+	workspace.Gravity = OrigWorld.Gravity
+	Lighting.Brightness = OrigWorld.Brightness
+	Lighting.ClockTime = OrigWorld.ClockTime
+	Lighting.FogEnd = OrigWorld.FogEnd
+	Lighting.GlobalShadows = OrigWorld.GlobalShadows
+	Lighting.Ambient = OrigWorld.Ambient
+	Camera.FieldOfView = OrigWorld.FOV
+	
+	if SG and SG.Parent then SG:Destroy() end
+	_G.BaggetCleanup = nil
+end
+
+_G.BaggetCleanup = fullCleanup
+
+local catSys = makeCategory("SYSTEM & UNLOAD (СИСТЕМА)", false)
+makeButton(catSys, "[X] UNLOAD SCRIPT (ПОЛНАЯ ВЫГРУЗКА)", RED, fullCleanup)
+
+-- ==========================================
+-- УПРАВЛЕНИЕ ОКНОМ И ГЛОБАЛЬНЫЙ ВВОД
+-- ==========================================
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+	minimized = not minimized
+	SF.Visible = not minimized
+	EmojiBG.Parent = minimized and nil or P
+	if minimized then
+		MinBtn.Text = "+"
+		P.Size = UDim2.new(0, 340, 0, 32)
+	else
+		MinBtn.Text = "-"
+		P.Size = UDim2.new(0, 340, 0, 560)
+	end
+end)
+
+local draggingWindow, dragStart, startPos = false, nil, nil
+TB.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		draggingWindow = true
+		dragStart = input.Position
+		startPos = P.Position
+	end
+end)
+
+bindConnection(UIS.InputChanged, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		if activeSliderUpdate then
+			activeSliderUpdate(input.Position)
+		elseif draggingWindow then
+			local delta = input.Position - dragStart
+			P.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end
+end)
+
+bindConnection(UIS.InputEnded, function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		activeSliderUpdate = nil
+		draggingWindow = false
+	end
+end)
+
+bindConnection(UIS.InputBegan, function(input, gp)
+	if bindingFeatureName then
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.Backspace then
+				Keybinds[bindingFeatureName] = nil
+				if _G.BaggetBinds[bindingFeatureName] then _G.BaggetBinds[bindingFeatureName].updateBtn(nil) end
+			else
+				Keybinds[bindingFeatureName] = input.KeyCode
+				if _G.BaggetBinds[bindingFeatureName] then _G.BaggetBinds[bindingFeatureName].updateBtn(input.KeyCode) end
+			end
+			bindingFeatureName = nil
+		end
+		return
+	end
+
+	-- Игнорируем нажатия клавиш, если открыт чат или поле ввода
+	if UIS:GetFocusedTextBox() then return end
+
+	if not gp and input.UserInputType == Enum.UserInputType.Keyboard then
+		if input.KeyCode == Enum.KeyCode.RightShift then
+			P.Visible = not P.Visible
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Space and S.InfiniteJump then
+			local h = getHum()
+			if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+		end
+		if input.KeyCode == Enum.KeyCode.V then
+			performDash()
+		end
+		
+		-- BTools Горячие клавиши (при зажатом Alt)
+		if S.BToolsHotkeys and (UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)) then
+			local t = Mouse.Target
+			if t and not t:IsDescendantOf(getChar()) then
+				if input.KeyCode == Enum.KeyCode.R then
+					t:Destroy()
+				elseif input.KeyCode == Enum.KeyCode.C then
+					local cl = trackPart(t:Clone())
+					cl.Parent = t.Parent
+					cl.CFrame = t.CFrame + Vector3.new(0, t.Size.Y, 0)
+				elseif input.KeyCode == Enum.KeyCode.A then
+					t.Anchored = not t.Anchored
+				end
+			end
+		end
+
+		for name, key in pairs(Keybinds) do
+			if key == input.KeyCode and _G.BaggetBinds and _G.BaggetBinds[name] then
+				_G.BaggetBinds[name].trigger()
+			end
+		end
+	end
+
+	-- Телепорт по клику (Ctrl + ЛКМ)
+	if S.CtrlClickTP and input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl) then
+			local r = getRoot()
+			if r and Mouse and Mouse.Hit then
+				r.CFrame = CFrame.new(Mouse.Hit.Position + Vector3.new(0, getGroundOffset(), 0))
+			end
+		end
+	end
+
+	-- Физический импульс по клику (Alt + ЛКМ)
+	if S.AltClickImpulse and input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt) then
+			if Mouse and Mouse.Target and not Mouse.Target.Anchored then
+				local dir = (Mouse.Hit.Position - Camera.CFrame.Position).Unit
+				Mouse.Target.AssemblyLinearVelocity = dir * 140 + Vector3.new(0, 60, 0)
+			end
+		end
+	end
+end)
+
+CB.MouseButton1Click:Connect(function() P.Visible = false end)
+
+-- Переподключение эффектов после респавна
+bindConnection(LP.CharacterAdded, function(c)
+	task.wait(0.4)
+	local h = c:WaitForChild("Humanoid", 5)
+	if h then
+		h.WalkSpeed = CFG.Speed
+		h.UseJumpPower = true
+		h.JumpPower = CFG.Jump
+	end
+	if S.Noclip then enableNoclip() end
+	if S.Fly then startFly() end
+	if S.AirWalk then toggleAirWalk(true) end
+	if S.Pulse then togglePulse(true) end
+	if S.Aura then toggleAura(true) end
+	if S.Halo then toggleHalo(true) end
+	if S.ChinaHat then toggleChinaHat(true) end
+	if S.CyberShield then toggleCyberShield(true) end
+	if S.OrbitOrbs then toggleOrbitOrbs(true) end
+	if S.Trail then toggleTrail(true) end
+	if S.InfiniteZoom then LP.CameraMaxZoomDistance = 99999 end
+end)
+
+print("[BAGGET SCRIPTS v18.0 STABLE] All modules verified and loaded!")
